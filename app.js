@@ -1153,6 +1153,10 @@ function setupDrawingRound(round, totalRounds, input, visualMode, duration, isIm
 // (0..1) du côté du carré — volontairement fin (juste de quoi prolonger un
 // trait), pas une vraie zone de dessin partagée.
 const CORPSE_OVERLAP = 0.01;
+// Largeur (fraction du carré) d'une toute petite bande de référence, montrant
+// juste où le trait du voisin s'arrête pour pouvoir reprendre au bon endroit
+// — pas assez large pour deviner le reste de son dessin.
+const CORPSE_REF_BAND = 0.012;
 function corpseQuadFrac(quadIndex, overlap = CORPSE_OVERLAP) {
   const half = 0.5;
   switch (quadIndex) {
@@ -1163,6 +1167,21 @@ function corpseQuadFrac(quadIndex, overlap = CORPSE_OVERLAP) {
     default: return { x0: 0, y0: 0, x1: 1, y1: 1 };
   }
 }
+// Rectangle (fractions du carré) de la toute petite bande de référence,
+// de part et d'autre du bord commun avec un voisin.
+function corpseRefBandFrac(side) {
+  const b = CORPSE_REF_BAND;
+  return side === "top"
+    ? { x0: 0, y0: 0.5 - b, x1: 1, y1: 0.5 + b }
+    : { x0: 0.5 - b, y0: 0, x1: 0.5 + b, y1: 1 }; // "left"
+}
+// quadrantIndex en cours de dessin -> { top / left: index du quart voisin déjà rempli }
+// (miroir exact de CORPSE_NEIGHBOR_MAP côté hôte, dans host-logic.js)
+const CORPSE_NEIGHBOR_INDEX = {
+  1: { left: 0 },
+  2: { top: 0 },
+  3: { top: 1, left: 2 },
+};
 
 function setupCorpseDrawingRound(round, totalRounds, quadrantIndex, sourcePhoto, neighbors, duration) {
   state.drawing.strokes = [];
@@ -1199,9 +1218,23 @@ function setupCorpseDrawingRound(round, totalRounds, quadrantIndex, sourcePhoto,
   // Rectangle (fractions du carré) où ce joueur a le droit de dessiner :
   // sa moitié, plus une petite marge de recouvrement vers le centre pour
   // pouvoir raccorder son trait avec le quart voisin déjà dessiné (même
-  // sans le voir : le petit débordement suffit à ce que le trait du quart
-  // suivant vienne recouvrir proprement la jonction).
+  // sans le voir en entier : le petit débordement suffit à ce que le trait
+  // du quart suivant vienne recouvrir proprement la jonction).
   state.drawing.corpseFrac = corpseQuadFrac(quadrantIndex);
+
+  // Précharge l'image du/des quart(s) voisin(s) déjà dessiné(s) : seule une
+  // toute petite bande près du bord commun en sera montrée (voir
+  // renderCanvas), juste de quoi savoir où reprendre le trait.
+  const neighborMap = CORPSE_NEIGHBOR_INDEX[quadrantIndex] || {};
+  state.drawing.corpseNeighborImgs = [];
+  ["top", "left"].forEach((side) => {
+    const neighborIdx = neighborMap[side];
+    const dataUrl = neighbors?.[side];
+    if (neighborIdx == null || !dataUrl) return;
+    const img = new Image();
+    img.src = dataUrl;
+    state.drawing.corpseNeighborImgs.push({ img, idx: neighborIdx, side });
+  });
 
   const grid = document.getElementById("corpse-grid");
   grid.classList.remove("hidden");
@@ -1389,6 +1422,20 @@ function renderCanvas(opts = {}) {
   const forceFull = !!opts.forceFull;
   const rect = canvasWrap.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
+
+  if (state.drawing.corpseFrac && !opts.skipCorpseLayers) {
+    for (const { img, idx, side } of state.drawing.corpseNeighborImgs) {
+      if (!img.complete || !img.naturalWidth) continue;
+      const f = corpseQuadFrac(idx);
+      const band = corpseRefBandFrac(side);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(band.x0 * rect.width, band.y0 * rect.height, (band.x1 - band.x0) * rect.width, (band.y1 - band.y0) * rect.height);
+      ctx.clip(); // seule cette toute petite bande sera visible, pas tout le dessin voisin
+      ctx.drawImage(img, f.x0 * rect.width, f.y0 * rect.height, (f.x1 - f.x0) * rect.width, (f.y1 - f.y0) * rect.height);
+      ctx.restore();
+    }
+  }
 
   const allStrokes = [...state.drawing.strokes];
   if (state.drawing.currentStroke) allStrokes.push(state.drawing.currentStroke);
