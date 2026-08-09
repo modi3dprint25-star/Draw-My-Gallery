@@ -52,7 +52,7 @@ function clampToWords(text, maxWords) {
 // nettoie/borne défensivement avant de le stocker et de le rediffuser, comme
 // pour tout contenu reçu d'un invité.
 const TIMELAPSE_MAX_STROKES = 600;
-const TIMELAPSE_MAX_POINTS_PER_STROKE = 60;
+const HOST_TIMELAPSE_MAX_POINTS_PER_STROKE = 60;
 function clampNum(n, min, max, fallback) {
   const v = Number(n);
   if (!Number.isFinite(v)) return fallback;
@@ -63,7 +63,7 @@ function sanitizeStrokes(strokes) {
   const rw = clampNum(strokes.rw, 1, 20000, 1);
   const rh = clampNum(strokes.rh, 1, 20000, 1);
   const cleanStrokes = strokes.strokes.slice(0, TIMELAPSE_MAX_STROKES).map((s) => {
-    const pts = Array.isArray(s?.p) ? s.p.slice(0, TIMELAPSE_MAX_POINTS_PER_STROKE) : [];
+    const pts = Array.isArray(s?.p) ? s.p.slice(0, HOST_TIMELAPSE_MAX_POINTS_PER_STROKE) : [];
     return {
       c: typeof s?.c === "string" ? s.c.slice(0, 20) : "#1a1a1a",
       s: clampNum(s?.s, 0, 2, 0.02),
