@@ -1183,6 +1183,16 @@ const CORPSE_NEIGHBOR_INDEX = {
   3: { top: 1, left: 2 },
 };
 
+// quadrant actif -> { index de la case adjacente : côté de CETTE case qui
+// fait face au quart actif (donc celui où découper le trou dans son masque) }
+// Jamais la case diagonale : elle ne partage aucun bord avec le quart actif.
+const CORPSE_MASK_INSET = {
+  0: { 1: "left", 2: "top" },
+  1: { 0: "right", 3: "top" },
+  2: { 0: "bottom", 3: "left" },
+  3: { 1: "bottom", 2: "right" },
+};
+
 function setupCorpseDrawingRound(round, totalRounds, quadrantIndex, sourcePhoto, neighbors, duration) {
   state.drawing.strokes = [];
   state.drawing.currentStroke = null;
@@ -1241,8 +1251,20 @@ function setupCorpseDrawingRound(round, totalRounds, quadrantIndex, sourcePhoto,
   grid.appendChild(canvasWrap); // le vrai canvas de dessin occupe TOUT le carré pendant ce tour
   canvasWrap.classList.add("corpse-active");
   const cells = Array.from(grid.querySelectorAll(".corpse-cell"));
+  // Le masque de chaque case pending/done colle pile à la moitié réelle du
+  // quart — mais le quart actif déborde très légèrement dedans (voir
+  // CORPSE_OVERLAP) pour pouvoir dessiner/voir la jonction. Sans ce trou, ce
+  // petit bout de trait resterait caché sous le masque du voisin bien qu'il
+  // soit bien capturé sur le canvas. On découpe donc, dans les 2 cases
+  // directement adjacentes au quart actif (jamais la diagonale, qui ne
+  // partage pas de bord), une bande transparente pile à la taille du
+  // débordement + de la bande de reprise, côté qui fait face au quart actif.
+  const revealPct = (Math.max(CORPSE_OVERLAP, CORPSE_REF_BAND) * 1.15 / 0.5 * 100).toFixed(3) + "%";
+  const insetSide = { left: `0 0 0 ${revealPct}`, right: `0 ${revealPct} 0 0`, top: `${revealPct} 0 0 0`, bottom: `0 0 ${revealPct} 0` };
+  const adjacency = CORPSE_MASK_INSET[quadrantIndex] || {};
   cells.forEach((cell, i) => {
     cell.className = "corpse-cell";
+    cell.style.clipPath = "";
     // Seul le quart actif reste visible. Tous les autres sont masqués — y
     // compris les voisins déjà dessinés (le petit recouvrement de dessin
     // suffit à raccorder les traits sans avoir besoin de voir leur contenu).
@@ -1253,6 +1275,8 @@ function setupCorpseDrawingRound(round, totalRounds, quadrantIndex, sourcePhoto,
     } else {
       cell.classList.add("pending"); // pas encore dessiné : caché
     }
+    const side = adjacency[i];
+    if (side) cell.style.clipPath = `inset(${insetSide[side]})`;
   });
 
   showScreen("screen-drawing");
