@@ -455,53 +455,26 @@ h2 { font-size: 1.4rem; }
 #draw-canvas { width: 100%; height: 100%; display: block; touch-action: none; transform-origin: 50% 50%; will-change: transform; }
 
 /* ---------------------- Mode "Cadavre exquis photo" ---------------------- */
+/* Carré unique : le vrai canvas de dessin (.canvas-wrap.corpse-active) occupe
+   TOUTE cette zone, en position absolute par-dessus laquelle les 4
+   .corpse-cell viennent seulement masquer les quarts pas encore dessinés.
+   Comme les cases collent pile à la moitié en largeur/hauteur (pas de gap,
+   pas de bordure interne), il n'y a aucun trou ni décalage une fois les 4
+   quarts assemblés côté révélation (voir buildCorpseAssembledSquare). */
 .corpse-grid {
+  position: relative;
   width: 100%;
   max-width: 640px;
   aspect-ratio: 1/1;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
-  gap: 6px;
   margin-bottom: 10px;
-}
-.corpse-cell {
-  position: relative;
-  border: 3px solid var(--ink);
+  border: 4px solid var(--ink);
   border-radius: var(--radius-md);
-  background-color: #fff;
-  background-size: cover;
-  background-position: center;
+  box-shadow: 6px 6px 0 var(--shadow-ink);
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
-.corpse-cell.pending {
-  background-image: repeating-linear-gradient(45deg, #eee, #eee 8px, #f5f2e6 8px, #f5f2e6 16px);
-}
-.corpse-cell.pending::after { content: "⏳"; font-size: 1.6rem; opacity: .5; }
-.corpse-cell.done { background-color: var(--paper); }
-.corpse-cell.done::after { content: "✅"; font-size: 1.6rem; opacity: .55; }
-.corpse-cell.active {
-  border-color: var(--purple);
-  border-width: 4px;
-  padding: 0;
-}
-/* Indice de jonction : seule une fine bande près du bord commun est visible,
-   le reste du quart voisin déjà dessiné reste caché (pas d'aveuglement global,
-   juste de quoi raccorder visuellement les traits). */
-.corpse-cell.reveal-right::after,
-.corpse-cell.reveal-bottom::after { content: none; }
-.corpse-cell.reveal-right {
-  -webkit-mask-image: linear-gradient(to left, #000 0%, #000 3%, transparent 9%);
-  mask-image: linear-gradient(to left, #000 0%, #000 3%, transparent 9%);
-}
-.corpse-cell.reveal-bottom {
-  -webkit-mask-image: linear-gradient(to top, #000 0%, #000 3%, transparent 9%);
-  mask-image: linear-gradient(to top, #000 0%, #000 3%, transparent 9%);
-}
-.corpse-cell.active .canvas-wrap {
+.corpse-grid .canvas-wrap.corpse-active {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   max-width: none;
@@ -509,7 +482,34 @@ h2 { font-size: 1.4rem; }
   border: none;
   box-shadow: none;
   border-radius: 0;
+  z-index: 1;
 }
+.corpse-cell {
+  position: absolute;
+  width: 50%;
+  height: 50%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none; /* purement visuel : le clamp du tracé se fait en JS */
+  background-size: cover;
+  background-position: center;
+}
+.corpse-cell[data-quad="0"] { left: 0; top: 0; }
+.corpse-cell[data-quad="1"] { left: 50%; top: 0; }
+.corpse-cell[data-quad="2"] { left: 0; top: 50%; }
+.corpse-cell[data-quad="3"] { left: 50%; top: 50%; }
+.corpse-cell.pending {
+  background-image: repeating-linear-gradient(45deg, #eee, #eee 8px, #f5f2e6 8px, #f5f2e6 16px);
+}
+.corpse-cell.pending::after { content: "⏳"; font-size: 1.6rem; opacity: .5; }
+.corpse-cell.done { background-color: var(--paper); }
+.corpse-cell.done::after { content: "✅"; font-size: 1.6rem; opacity: .55; }
+/* Quart actif + voisin(s) déjà dessiné(s) : aucun masque, le canvas est
+   visible en dessous (référence peinte directement dessus, voir renderCanvas
+   dans app.js) pour pouvoir raccorder son trait au pixel près. */
+.corpse-cell.visible { background: none; }
 
 .toolbox {
   width: 100%;
@@ -896,6 +896,24 @@ h2 { font-size: 1.4rem; }
   box-shadow: 5px 5px 0 var(--shadow-ink);
 }
 .album-flipbook.hidden { display: none; }
+.corpse-assembled-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin: 4px auto 14px;
+}
+.corpse-assembled-wrap.hidden { display: none; }
+.corpse-assembled-img {
+  display: block;
+  width: min(72vw, 300px);
+  aspect-ratio: 1/1;
+  object-fit: cover;
+  border: 4px solid var(--ink);
+  border-radius: var(--radius-md);
+  box-shadow: 6px 6px 0 var(--shadow-ink);
+  background: #fff;
+}
 .album-flipbook img {
   display: block;
   width: 100%;

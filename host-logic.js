@@ -333,14 +333,20 @@ const HostLogic = (() => {
     // modes qui reposent sur la chaîne. Le vote qualité reste compatible (il
     // est réutilisé pour le coup de cœur sur les quarts) et n'est donc PAS
     // désactivé ici.
+    // IMPORTANT : ce test doit passer AVANT le bloc "si corpseMode, désactive
+    // les autres" ci-dessous. Sinon, activer un de ces 3 modes pendant que
+    // Cadavre exquis est encore actif se faisait écraser par ce même bloc
+    // (qui voyait encore l'ancien corpseMode=true) avant d'être lui-même
+    // désactivé — le mode qu'on venait de cliquer restait donc éteint, et
+    // il fallait recliquer une deuxième fois pour qu'il s'active vraiment.
+    if (descriptionMode === true || impostorMode === true || loopbackMode === true) {
+      room.settings.corpseMode = false;
+    }
     if (room.settings.corpseMode) {
       room.settings.descriptionMode = false;
       room.settings.impostorMode = false;
       room.settings.loopbackMode = false;
       room.settings.constrainedDescription = false;
-    }
-    if (descriptionMode === true || impostorMode === true || loopbackMode === true) {
-      room.settings.corpseMode = false;
     }
     broadcastRoomState();
   }

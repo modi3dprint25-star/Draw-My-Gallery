@@ -33,6 +33,10 @@ const state = {
   isHost: false,
   drawing: {
     strokes: [], currentStroke: null, tool: "pen", color: "#1a1a1a", size: 8, mode: "normal", rafId: null, modeStart: null,
+    // Mode "Cadavre exquis photo" uniquement : rectangle (fractions 0..1 de la
+    // zone de dessin) où ce joueur a le droit de dessiner, et images des
+    // quarts voisins déjà dessinés, affichées en fond pour raccorder les traits.
+    corpseFrac: null, corpseNeighborImgs: [],
   },
   gallery: { pool: [], shown: [], candidateFile: null, candidateObjectUrl: null },
 };
@@ -646,11 +650,18 @@ function compressImageToDataUrl(file, maxDim, quality, maxBytes = 700 * 1024) {
 }
 
 /** Même logique que ci-dessus, mais à partir d'un <canvas> déjà dessiné (dessins de manche). */
-function canvasToSafeDataUrl(sourceCanvas, maxDim = 900, quality = 0.85, maxBytes = 700 * 1024) {
-  return downscaleToDataUrl(sourceCanvas, sourceCanvas.width, sourceCanvas.height, maxDim, quality, maxBytes);
+function canvasToSafeDataUrl(sourceCanvas, maxDim = 900, quality = 0.85, maxBytes = 700 * 1024, cropFrac = null) {
+  let sx = 0, sy = 0, srcWidth = sourceCanvas.width, srcHeight = sourceCanvas.height;
+  if (cropFrac) {
+    sx = Math.round(cropFrac.x0 * sourceCanvas.width);
+    sy = Math.round(cropFrac.y0 * sourceCanvas.height);
+    srcWidth = Math.round((cropFrac.x1 - cropFrac.x0) * sourceCanvas.width);
+    srcHeight = Math.round((cropFrac.y1 - cropFrac.y0) * sourceCanvas.height);
+  }
+  return downscaleToDataUrl(sourceCanvas, srcWidth, srcHeight, maxDim, quality, maxBytes, sx, sy);
 }
 
-function downscaleToDataUrl(source, srcWidth, srcHeight, maxDim, quality, maxBytes) {
+function downscaleToDataUrl(source, srcWidth, srcHeight, maxDim, quality, maxBytes, sx = 0, sy = 0) {
   let width = srcWidth, height = srcHeight;
   if (width > height && width > maxDim) {
     height = Math.round((height * maxDim) / width); width = maxDim;
@@ -662,7 +673,7 @@ function downscaleToDataUrl(source, srcWidth, srcHeight, maxDim, quality, maxByt
   const c2d = canvas.getContext("2d");
   c2d.fillStyle = "#ffffff";
   c2d.fillRect(0, 0, width, height);
-  c2d.drawImage(source, 0, 0, width, height);
+  c2d.drawImage(source, sx, sy, srcWidth, srcHeight, 0, 0, width, height);
 
   let q = quality;
   let dataUrl = canvas.toDataURL("image/jpeg", q);
@@ -676,7 +687,7 @@ function downscaleToDataUrl(source, srcWidth, srcHeight, maxDim, quality, maxByt
       canvas.height = Math.round(canvas.height * 0.8);
       c2d.fillStyle = "#ffffff";
       c2d.fillRect(0, 0, canvas.width, canvas.height);
-      c2d.drawImage(source, 0, 0, canvas.width, canvas.height);
+      c2d.drawImage(source, sx, sy, srcWidth, srcHeight, 0, 0, canvas.width, canvas.height);
     }
     dataUrl = canvas.toDataURL("image/jpeg", q);
   }
@@ -1050,6 +1061,9 @@ function restoreCanvasWrapHome() {
   if (canvasWrap.parentNode !== canvasWrapHome.parent) {
     canvasWrapHome.parent.insertBefore(canvasWrap, canvasWrapHome.next);
   }
+  canvasWrap.classList.remove("corpse-active");
+  state.drawing.corpseFrac = null;
+  state.drawing.corpseNeighborImgs = [];
   document.getElementById("corpse-grid").classList.add("hidden");
 }
 
@@ -1129,11 +1143,29 @@ function setupDrawingRound(round, totalRounds, input, visualMode, duration, isIm
   startRenderLoop();
 }
 
-// quadrant en cours -> { cellIndex du voisin déjà rempli: classe CSS à appliquer }
-const CORPSE_HINT_LAYOUT = {
-  1: [{ cell: 0, side: "left", cls: "reveal-right" }],
-  2: [{ cell: 0, side: "top", cls: "reveal-bottom" }],
-  3: [{ cell: 1, side: "top", cls: "reveal-bottom" }, { cell: 2, side: "left", cls: "reveal-right" }],
+// ---- Géométrie du mode "Cadavre exquis photo" ----
+// La zone de dessin est un carré unique (pas 4 cases séparées par des
+// marges) : chaque quart occupe pile la moitié en largeur/hauteur, PLUS une
+// petite marge de recouvrement vers le centre pour pouvoir raccorder son
+// trait avec le quart voisin déjà dessiné (comme le cadavre exquis de Gartic
+// Phone). CORPSE_OVERLAP est exprimé en fraction (0..1) du côté du carré.
+const CORPSE_OVERLAP = 0.06;
+function corpseQuadFrac(quadIndex, overlap = CORPSE_OVERLAP) {
+  const half = 0.5;
+  switch (quadIndex) {
+    case 0: return { x0: 0, y0: 0, x1: half + overlap, y1: half + overlap }; // haut-gauche
+    case 1: return { x0: half - overlap, y0: 0, x1: 1, y1: half + overlap }; // haut-droite
+    case 2: return { x0: 0, y0: half - overlap, x1: half + overlap, y1: 1 }; // bas-gauche
+    case 3: return { x0: half - overlap, y0: half - overlap, x1: 1, y1: 1 }; // bas-droite
+    default: return { x0: 0, y0: 0, x1: 1, y1: 1 };
+  }
+}
+// quadrantIndex en cours de dessin -> { top / left: index du quart voisin déjà rempli }
+// (miroir exact de CORPSE_NEIGHBOR_MAP côté hôte, dans host-logic.js)
+const CORPSE_NEIGHBOR_INDEX = {
+  1: { left: 0 },
+  2: { top: 0 },
+  3: { top: 1, left: 2 },
 };
 
 function setupCorpseDrawingRound(round, totalRounds, quadrantIndex, sourcePhoto, neighbors, duration) {
@@ -1168,28 +1200,45 @@ function setupCorpseDrawingRound(round, totalRounds, quadrantIndex, sourcePhoto,
   swatchWrap.classList.remove("locked");
   setTool("pen");
 
+  // Rectangle (fractions du carré) où ce joueur a le droit de dessiner :
+  // sa moitié, plus une petite marge de recouvrement vers le centre pour
+  // pouvoir raccorder son trait à celui du quart voisin déjà dessiné.
+  state.drawing.corpseFrac = corpseQuadFrac(quadrantIndex);
+
+  // Précharge l'image du/des quart(s) voisin(s) déjà dessiné(s), pour les
+  // peindre directement sur le canvas (voir renderCanvas) à leur véritable
+  // emplacement — le joueur voit ainsi le trait exact à raccorder, pas
+  // juste une fine bande floutée.
+  const neighborMap = CORPSE_NEIGHBOR_INDEX[quadrantIndex] || {};
+  state.drawing.corpseNeighborImgs = [];
+  ["top", "left"].forEach((side) => {
+    const neighborIdx = neighborMap[side];
+    const dataUrl = neighbors?.[side];
+    if (neighborIdx == null || !dataUrl) return;
+    const img = new Image();
+    img.src = dataUrl;
+    state.drawing.corpseNeighborImgs.push({ img, idx: neighborIdx });
+  });
+
   const grid = document.getElementById("corpse-grid");
   grid.classList.remove("hidden");
+  grid.appendChild(canvasWrap); // le vrai canvas de dessin occupe TOUT le carré pendant ce tour
+  canvasWrap.classList.add("corpse-active");
   const cells = Array.from(grid.querySelectorAll(".corpse-cell"));
   cells.forEach((cell, i) => {
     cell.className = "corpse-cell";
-    cell.style.backgroundImage = "";
-    cell.innerHTML = "";
-    if (i === quadrantIndex) {
-      cell.classList.add("active");
-      cell.appendChild(canvasWrap); // le vrai canvas de dessin vit ici pendant ce tour
+    // Un quart est masqué (pointillés "en attente") seulement s'il n'a pas
+    // encore été dessiné par personne. Le quart actif et les voisins déjà
+    // dessinés (référence peinte sur le canvas juste au-dessus) restent
+    // visibles à travers — pas de case cachée pour un voisin adjacent.
+    const isNeighbor = i === quadrantIndex || state.drawing.corpseNeighborImgs.some((n) => n.idx === i);
+    if (isNeighbor) {
+      cell.classList.add("visible");
     } else if (i < quadrantIndex) {
-      cell.classList.add("done"); // déjà dessiné par quelqu'un, mais pas un voisin direct : caché
+      cell.classList.add("done"); // déjà dessiné par quelqu'un, mais pas adjacent au quart actif : caché
     } else {
       cell.classList.add("pending");
     }
-  });
-  (CORPSE_HINT_LAYOUT[quadrantIndex] || []).forEach(({ cell, side, cls }) => {
-    const dataUrl = neighbors?.[side];
-    if (!dataUrl) return;
-    const el = cells[cell];
-    el.className = "corpse-cell " + cls;
-    el.style.backgroundImage = `url(${dataUrl})`;
   });
 
   showScreen("screen-drawing");
@@ -1287,6 +1336,15 @@ function getCanvasCoords(evt) {
   }
   return { x, y };
 }
+function clampToCorpseZone(pt) {
+  const frac = state.drawing.corpseFrac;
+  if (!frac) return pt;
+  const rect = canvasWrap.getBoundingClientRect();
+  return {
+    x: Math.min(Math.max(pt.x, frac.x0 * rect.width), frac.x1 * rect.width),
+    y: Math.min(Math.max(pt.y, frac.y0 * rect.height), frac.y1 * rect.height),
+  };
+}
 const WOBBLE_AMOUNT = 7; // px de tremblement ajouté à chaque point en mode "wobbly"
 function applyWobble({ x, y }) {
   if (state.drawing.mode !== "wobbly") return { x, y };
@@ -1300,7 +1358,7 @@ canvas.addEventListener("pointerdown", (evt) => {
   if (drawSubmitted) return;
   isPointerDown = true;
   canvas.setPointerCapture(evt.pointerId);
-  const { x, y } = applyWobble(getCanvasCoords(evt));
+  const { x, y } = clampToCorpseZone(applyWobble(getCanvasCoords(evt)));
   state.drawing.currentStroke = {
     points: [{ x, y, ts: Date.now() }],
     color: state.drawing.color,
@@ -1311,7 +1369,7 @@ canvas.addEventListener("pointerdown", (evt) => {
 });
 canvas.addEventListener("pointermove", (evt) => {
   if (!isPointerDown || !state.drawing.currentStroke) return;
-  const { x, y } = applyWobble(getCanvasCoords(evt));
+  const { x, y } = clampToCorpseZone(applyWobble(getCanvasCoords(evt)));
   state.drawing.currentStroke.points.push({ x, y, ts: Date.now() });
 });
 function endStroke() {
@@ -1350,6 +1408,14 @@ function renderCanvas(opts = {}) {
   const forceFull = !!opts.forceFull;
   const rect = canvasWrap.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
+
+  if (state.drawing.corpseFrac && !opts.skipCorpseLayers) {
+    for (const { img, idx } of state.drawing.corpseNeighborImgs) {
+      if (!img.complete || !img.naturalWidth) continue;
+      const f = corpseQuadFrac(idx);
+      ctx.drawImage(img, f.x0 * rect.width, f.y0 * rect.height, (f.x1 - f.x0) * rect.width, (f.y1 - f.y0) * rect.height);
+    }
+  }
 
   const allStrokes = [...state.drawing.strokes];
   if (state.drawing.currentStroke) allStrokes.push(state.drawing.currentStroke);
@@ -1458,11 +1524,17 @@ function submitDrawing() {
   document.getElementById("btn-submit-drawing").disabled = true;
   // On force un rendu complet (sans traînée qui s'efface) juste avant la capture :
   // le mode "yeux fermés" ne cache que ce que le joueur VOIT pendant qu'il dessine,
-  // le dessin envoyé aux autres doit rester entier.
-  renderCanvas({ forceFull: true });
+  // le dessin envoyé aux autres doit rester entier. En Cadavre exquis, on exclut
+  // aussi le calque de référence du voisin (skipCorpseLayers) : seuls SES propres
+  // traits doivent partir, pas une copie du dessin du voisin.
+  renderCanvas({ forceFull: true, skipCorpseLayers: true });
   // Sur un écran haute résolution (devicePixelRatio élevé), un PNG brut du canvas
   // peut peser plusieurs Mo : on le compresse pour fiabiliser l'envoi P2P.
-  const dataUrl = canvasToSafeDataUrl(canvas, 900, 0.85, 700 * 1024);
+  // Mode Cadavre exquis : on ne garde que le rectangle du quart du joueur
+  // (moitié + petite marge de recouvrement), pas le carré entier.
+  const dataUrl = state.drawing.corpseFrac
+    ? canvasToSafeDataUrl(canvas, 640, 0.85, 700 * 1024, state.drawing.corpseFrac)
+    : canvasToSafeDataUrl(canvas, 900, 0.85, 700 * 1024);
   const timelapse = buildTimelapsePayload();
   socket.emit("submit_round_contribution", { content: dataUrl, round: currentRoundIndex, strokes: timelapse }, (res) => {
     if (!res?.ok) {
@@ -1646,6 +1718,8 @@ socket.on("phase_album_answer", ({ ownerName, ownerAvatar, items, votes, index, 
   document.getElementById("album-owner-title").textContent = ownerName || "?";
   qualityVoteSubmitted = false;
   albumStripCards = [];
+  corpseRevealToken++; // invalide un assemblage "Cadavre exquis" encore en cours de chargement
+  document.getElementById("corpse-assembled-wrap").classList.add("hidden");
 
   const guesserList = document.getElementById("album-guesser-list");
   guesserList.innerHTML = "";
@@ -1757,10 +1831,45 @@ socket.on("phase_album_answer", ({ ownerName, ownerAvatar, items, votes, index, 
   playAlbumFlipbook(items, buildAlbumStrip);
 });
 
+// ---- Assemblage du carré final "Cadavre exquis photo" ----
+// Charge les 4 images de quarts (peuvent arriver dans n'importe quel ordre
+// réseau) puis les colle dans l'ORDRE DE DESSIN (0,1,2,3) sur un canvas
+// carré unique, chacune à son emplacement réel (recouvrement inclus). Le
+// quart dessiné plus tard écrase la petite bande de recouvrement du quart
+// précédent avec SA version — exactement le raccord que son auteur avait
+// sous les yeux (l'image du voisin était peinte en référence sur son
+// canvas pendant qu'il dessinait), donc le résultat final est continu, sans
+// trou ni bord dupliqué.
+function loadImageAsync(src) {
+  return new Promise((resolve) => {
+    if (!src) { resolve(null); return; }
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+async function buildCorpseAssembledSquare(quadrantContents, size = 640) {
+  const imgs = await Promise.all((quadrantContents || []).map(loadImageAsync));
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const c2d = canvas.getContext("2d");
+  c2d.fillStyle = "#ffffff";
+  c2d.fillRect(0, 0, size, size);
+  imgs.forEach((img, i) => {
+    if (!img) return;
+    const f = corpseQuadFrac(i);
+    c2d.drawImage(img, f.x0 * size, f.y0 * size, (f.x1 - f.x0) * size, (f.y1 - f.y0) * size);
+  });
+  return canvas.toDataURL("image/jpeg", 0.9);
+}
+
 // ---- Révélation "Cadavre exquis photo" : réutilise l'écran d'album (même
 // bande de cartes, mêmes étoiles de vote qualité) mais sans liste de votes
 // "à qui c'est" (trivial ici) et sans time-lapse. ----
 const CORPSE_QUAD_LABELS = ["↖️ Haut-gauche", "↗️ Haut-droite", "↙️ Bas-gauche", "↘️ Bas-droite"];
+let corpseRevealToken = 0;
 socket.on("phase_corpse_reveal", ({ index, total, sourcePhoto, ownerName, ownerAvatar, quadrants, qualityVoteEnabled }) => {
   document.getElementById("album-index").textContent = index;
   document.getElementById("album-total").textContent = total;
@@ -1776,6 +1885,16 @@ socket.on("phase_corpse_reveal", ({ index, total, sourcePhoto, ownerName, ownerA
   li.textContent = "🧩 Cadavre exquis — personne n'avait la vue d'ensemble en dessinant !";
   guesserList.appendChild(li);
   document.getElementById("album-flipbook").classList.add("hidden");
+
+  const assembledWrap = document.getElementById("corpse-assembled-wrap");
+  const assembledImg = document.getElementById("corpse-assembled-img");
+  assembledWrap.classList.add("hidden");
+  const revealToken = ++corpseRevealToken;
+  buildCorpseAssembledSquare((quadrants || []).map((q) => q.content)).then((dataUrl) => {
+    if (revealToken !== corpseRevealToken) return; // une autre carte a déjà pris le relais
+    setImageWithFallback(assembledImg, dataUrl, "Assemblage indisponible");
+    assembledWrap.classList.remove("hidden");
+  });
 
   const strip = document.getElementById("album-strip");
   strip.innerHTML = "";
