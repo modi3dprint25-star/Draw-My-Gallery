@@ -357,7 +357,7 @@ const HostLogic = (() => {
   // aimeraient. Un joueur ne peut avoir son avatar que sur UNE carte de mode
   // ET UNE carte d'effet à la fois (reclique sur la même carte = retire son
   // vote). C'est à l'hôte de décider s'il en tient compte.
-  const SPECIAL_EFFECT_KEYS = ["descriptionMode", "impostorMode", "loopbackMode", "constrainedDescription", "qualityVoteMode"];
+  const SPECIAL_EFFECT_KEYS = ["descriptionMode", "impostorMode", "loopbackMode", "constrainedDescription", "qualityVoteMode", "corpseMode"];
 
   function onVoteMode(playerId, { mode } = {}) {
     if (!room || room.phase !== PHASES.LOBBY) return;
