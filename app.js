@@ -1348,7 +1348,7 @@ function buildTimelapsePayload() {
   return { rw, rh, strokes };
 }
 
-document.getElementById("btn-submit-drawing").addEventListener("click", () => {
+function submitDrawing() {
   if (drawSubmitted) return;
   drawSubmitted = true;
   document.getElementById("btn-submit-drawing").disabled = true;
@@ -1369,7 +1369,8 @@ document.getElementById("btn-submit-drawing").addEventListener("click", () => {
       toast("Dessin envoyé ! En attente des autres…");
     }
   });
-});
+}
+document.getElementById("btn-submit-drawing").addEventListener("click", submitDrawing);
 
 // ---- Tour de description ----
 const CLIENT_DESCRIPTION_MAX_WORDS = 5;
@@ -1386,6 +1387,7 @@ function setupDescribeRound(round, totalRounds, input, duration) {
   const ta = document.getElementById("describe-textarea");
   ta.value = "";
   ta.disabled = false;
+  descSubmitted = false;
   updateDescribeCounter();
   document.getElementById("btn-submit-description").disabled = false;
   showScreen("screen-describe");
@@ -1409,21 +1411,29 @@ document.getElementById("describe-textarea").addEventListener("input", (e) => {
   }
   updateDescribeCounter();
 });
-document.getElementById("btn-submit-description").addEventListener("click", () => {
+let descSubmitted = false;
+function submitDescription() {
+  if (descSubmitted) return;
   const ta = document.getElementById("describe-textarea");
   const text = ta.value.trim();
-  if (!text) return toast("Écris une petite description avant de valider.");
+  descSubmitted = true;
   ta.disabled = true;
   document.getElementById("btn-submit-description").disabled = true;
   socket.emit("submit_round_contribution", { content: text, round: currentRoundIndex }, (res) => {
     if (!res?.ok) {
       toast("Erreur d'envoi");
+      descSubmitted = false;
       ta.disabled = false;
       document.getElementById("btn-submit-description").disabled = false;
     } else {
       toast("Description envoyée ! En attente des autres…");
     }
   });
+}
+document.getElementById("btn-submit-description").addEventListener("click", () => {
+  const text = document.getElementById("describe-textarea").value.trim();
+  if (!text) return toast("Écris une petite description avant de valider.");
+  submitDescription();
 });
 
 // ------------------------------------------------------------------
@@ -1433,10 +1443,22 @@ socket.on("timer_tick", ({ phase, remaining }) => {
   if (phase === "round") {
     if (currentRoundType === "drawing" && document.getElementById("screen-drawing").classList.contains("active")) {
       document.getElementById("drawing-timer").textContent = remaining;
-      if (remaining <= 0) document.getElementById("btn-submit-drawing").disabled = true;
+      if (remaining <= 0) {
+        document.getElementById("btn-submit-drawing").disabled = true;
+        // Le joueur n'a pas cliqué "Valider" à temps : on envoie quand même ce
+        // qu'il a dessiné (même vide) au lieu de laisser passer la manche sans
+        // rien envoyer — sinon l'hôte pose un contenu de secours vide et
+        // l'image apparaît "indisponible" plus loin dans la chaîne/l'album.
+        submitDrawing();
+      }
     } else if (currentRoundType === "description" && document.getElementById("screen-describe").classList.contains("active")) {
       document.getElementById("describe-timer").textContent = remaining;
-      if (remaining <= 0) document.getElementById("btn-submit-description").disabled = true;
+      if (remaining <= 0) {
+        document.getElementById("btn-submit-description").disabled = true;
+        // Même logique que pour le dessin : on envoie ce qui a été tapé,
+        // même vide, plutôt que de ne rien envoyer du tout.
+        submitDescription();
+      }
     }
   } else if (phase === "reveal_vote") {
     document.getElementById("vote-timer").textContent = remaining;
