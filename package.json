@@ -1,0 +1,13 @@
+{
+  "name": "draw-my-gallery",
+  "version": "2.0.0",
+  "description": "Jeu multijoueur pair-à-pair (WebRTC/PeerJS, 100% client) — redessine la photo d'un inconnu, devine sa galerie",
+  "private": true,
+  "scripts": {
+    "start": "npx http-server . -p 8080 -c-1",
+    "dev": "npx http-server . -p 8080 -c-1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

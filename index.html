@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="color-scheme" content="light only" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Draw My Gallery</title>
+
+<!-- PWA / plein écran mobile : "Ajouter à l'écran d'accueil" lance le jeu
+     sans barres de navigateur, sur iPhone comme sur Android. -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#5a3ef0" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Draw My Gallery" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<link rel="icon" href="icon-192.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=6" />
+</head>
+<body>
+
+<div id="toast" class="toast hidden"></div>
+
+<!-- ===================== ECRAN : ACCUEIL / LOBBY ===================== -->
+<section id="screen-home" class="screen active">
+  <div class="blob blob-a"></div>
+  <div class="blob blob-b"></div>
+  <div class="blob blob-c"></div>
+
+  <div class="card home-card">
+    <h1 class="logo">
+      <span class="logo-line1">Draw My</span>
+      <span class="logo-line2">Gallery</span>
+      <span class="logo-emoji">🎨📸</span>
+    </h1>
+    <p class="tagline">Redessine, transmets, découvre l'album complet !</p>
+    <div class="home-links-row">
+      <button id="btn-how-to-play" class="how-to-play-link" type="button">❓ Comment jouer ?</button>
+      <button id="btn-install-app" class="how-to-play-link hidden" type="button">📲 Installer l'app</button>
+    </div>
+
+    <label class="field-label" for="input-name">Ton pseudo</label>
+    <input id="input-name" class="text-input" maxlength="20" placeholder="Ex: Capitaine Croquis" />
+
+    <label class="field-label">Choisis ton avatar</label>
+    <div id="avatar-picker" class="avatar-picker"></div>
+
+    <div class="home-actions">
+      <button id="btn-create" class="btn btn-primary btn-big">🎉 Créer une partie</button>
+
+      <div class="join-block">
+        <label class="field-label" for="input-code">Code de la partie</label>
+        <input id="input-code" class="text-input code-input" maxlength="6" placeholder="CODE" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" inputmode="text" />
+        <button id="btn-join" class="btn btn-secondary btn-big">🔑 Rejoindre</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== ECRAN : SALLE D'ATTENTE ===================== -->
+<section id="screen-lobby" class="screen">
+  <div class="topbar">
+    <div class="room-code-chip">Salon : <span id="lobby-room-code">----</span></div>
+    <button id="btn-copy-invite" class="btn btn-ghost">🔗 Copier le lien d'invitation</button>
+    <button id="btn-leave-lobby" class="btn btn-ghost">Quitter</button>
+  </div>
+
+  <div class="lobby-grid">
+    <div class="card players-card">
+      <h2>👥 Joueurs <span id="lobby-player-count">(0/12)</span></h2>
+      <ul id="lobby-player-list" class="player-list"></ul>
+      <p class="hint">De 2 à 12 joueurs. Avec 2 joueurs, la chaîne de dessins est prolongée pour rester amusante.</p>
+    </div>
+
+    <div class="card settings-card">
+      <h2>⚙️ Réglages de la partie</h2>
+
+      <div class="setting-block">
+        <span class="field-label">Durée d'un tour de dessin</span>
+        <div id="duration-options" class="chip-group">
+          <button class="chip" data-duration="45">45s</button>
+          <button class="chip" data-duration="60">60s</button>
+          <button class="chip" data-duration="90">90s</button>
+          <button class="chip" data-duration="120">120s</button>
+        </div>
+      </div>
+
+      <div class="setting-block">
+        <span class="field-label">Modes drôles activés (tiré aléatoirement à chaque tour de dessin)</span>
+        <div id="mode-options" class="mode-card-grid">
+          <button class="mode-card" data-mode="normal">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">✏️</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Normal</span>
+            <p class="mode-card-desc">Aucune contrainte, on dessine tranquille.</p>
+          </button>
+          <button class="mode-card" data-mode="blind">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">🙈</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Les yeux fermés</span>
+            <p class="mode-card-desc">Ton trait s'efface derrière toi : tu ne vois qu'une petite traînée qui disparaît.</p>
+          </button>
+          <button class="mode-card" data-mode="upside_down">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">🙃</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Tête à l'envers</span>
+            <p class="mode-card-desc">La référence et le canvas sont retournés à l'écran.</p>
+          </button>
+          <button class="mode-card" data-mode="wobbly">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">🫨</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Tremblote</span>
+            <p class="mode-card-desc">Ton pinceau tremble tout seul en dessinant.</p>
+          </button>
+          <button class="mode-card" data-mode="giant_brush">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">🖍️</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Pinceau XXL</span>
+            <p class="mode-card-desc">Taille de pinceau énorme, imposée et verrouillée.</p>
+          </button>
+          <button class="mode-card" data-mode="mystery_color">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">🎨</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Couleur mystère</span>
+            <p class="mode-card-desc">Une seule couleur tirée au sort, palette bloquée.</p>
+          </button>
+          <button class="mode-card" data-mode="manege">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">🎠</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Manège</span>
+            <p class="mode-card-desc">La zone de dessin tourne doucement sur elle-même pendant que tu dessines.</p>
+          </button>
+          <button class="mode-card" data-mode="derive">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">🌊</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Dérive</span>
+            <p class="mode-card-desc">Le dessin glisse tout seul assez vite : faut suivre le mouvement !</p>
+          </button>
+        </div>
+      </div>
+
+      <div class="setting-block">
+        <span class="field-label">Modes spéciaux (changent le déroulé de la partie)</span>
+        <div id="special-options" class="mode-card-grid">
+          <button class="mode-card mode-card-special" id="chip-description-mode" data-toggle="descriptionMode">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">📝</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Tours de description texte</span>
+            <p class="mode-card-desc">La chaîne alterne : Dessin → Description écrite → Dessin → …</p>
+          </button>
+          <button class="mode-card mode-card-special" id="chip-impostor-mode" data-toggle="impostorMode">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">🎭</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Imposteur</span>
+            <p class="mode-card-desc">Chaque tour, un joueur tiré au sort reçoit la mission secrète d'ajouter un détail qui n'existe pas sur l'original. Révélé à l'album !</p>
+          </button>
+          <button class="mode-card mode-card-special" id="chip-loopback-mode" data-toggle="loopbackMode">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">🔁</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Retour en arrière</span>
+            <p class="mode-card-desc">Le tout dernier tour de chaque chaîne redonne la photo de départ à redessiner, sans le dire. Effet boucle garanti à la révélation.</p>
+          </button>
+          <button class="mode-card mode-card-special" id="chip-constrained-description" data-toggle="constrainedDescription">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">✂️</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Description en 5 mots</span>
+            <p class="mode-card-desc">Avec les tours de description activés : 5 mots maximum, pas un de plus. Nécessite le mode "Tours de description".</p>
+          </button>
+          <button class="mode-card mode-card-special" id="chip-quality-vote" data-toggle="qualityVoteMode">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">⭐</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Vote qualité</span>
+            <p class="mode-card-desc">À chaque révélation d'album, vote pour l'étape que tu préfères. La plus votée rapporte un bonus à son auteur.</p>
+          </button>
+        </div>
+      </div>
+
+      <button id="btn-start-game" class="btn btn-primary btn-big">🚀 Lancer la partie</button>
+      <p id="lobby-hint" class="hint">Il faut entre 2 et 12 joueurs pour démarrer.</p>
+      <p id="lobby-not-host" class="hint hidden">En attente que l'hôte lance la partie…</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== ECRAN : TIRAGE & VALIDATION DE LA PHOTO ===================== -->
+<section id="screen-gallery" class="screen">
+  <div class="card center-card">
+    <h2>🎲 Tirage de ta photo</h2>
+    <p class="hint">Ouvre ta galerie et sélectionne un max de photos (idéalement toutes !). C'est nous qui piochons ensuite au hasard dedans — toi, tu dis juste oui ou non à chaque photo tirée. 🙊</p>
+
+    <button id="btn-pick-gallery" class="btn btn-secondary btn-big">📂 Ouvrir ma galerie</button>
+    <input id="gallery-input" type="file" accept="image/*" multiple class="hidden" />
+    <p id="gallery-pool-count" class="hint hidden"><span id="gallery-pool-count-num">0</span> photo(s) dans le chapeau 🎩</p>
+
+    <div id="draw-photo-zone" class="draw-photo-zone hidden">
+      <span class="mini-label">Photo tirée au sort (privée, personne d'autre ne la voit)</span>
+      <img id="draw-photo-preview" class="draw-photo-preview" alt="Photo tirée au sort" />
+      <div class="gallery-actions">
+        <button id="btn-refuse-photo" class="btn btn-secondary">🙈 Non, une autre !</button>
+        <button id="btn-accept-photo" class="btn btn-primary">✅ Oui, je valide !</button>
+      </div>
+    </div>
+
+    <p id="gallery-status" class="hint"></p>
+  </div>
+
+  <div class="card players-card gallery-wait-card">
+    <h2>👥 Qui a validé sa photo ?</h2>
+    <ul id="gallery-wait-list" class="player-list"></ul>
+  </div>
+</section>
+
+<!-- ===================== ECRAN : TOUR DE DESSIN ===================== -->
+<section id="screen-drawing" class="screen">
+  <div class="drawing-topbar">
+    <div class="timer-pill" id="drawing-timer">60</div>
+    <div class="round-pill" id="drawing-round-label">Tour 1/4</div>
+    <div class="mode-pill" id="drawing-mode-label">✏️ Normal</div>
+  </div>
+
+  <div id="impostor-hint" class="impostor-hint hidden">🎭 Tu es l'imposteur ! Ajoute discrètement un détail qui n'existe PAS sur l'original…</div>
+
+  <div id="drawing-reference-image-wrap" class="reference-wrap hidden">
+    <span class="mini-label" id="drawing-reference-label">À reproduire</span>
+    <img id="reference-photo" class="reference-photo" alt="Référence à reproduire" />
+  </div>
+  <div id="drawing-reference-text-wrap" class="reference-text-wrap hidden">
+    <span class="mini-label">On t'a décrit ceci, dessine-le :</span>
+    <p id="reference-text" class="reference-text"></p>
+  </div>
+
+  <div id="canvas-wrap" class="canvas-wrap">
+    <canvas id="draw-canvas"></canvas>
+    <div id="blind-overlay" class="blind-overlay hidden">🙈 Ton trait s'efface derrière toi…</div>
+  </div>
+
+  <div class="toolbox">
+    <div class="color-swatches" id="color-swatches"></div>
+    <input id="color-picker" type="color" value="#1a1a1a" class="color-picker" />
+
+    <div class="brush-row">
+      <label class="mini-label">Taille</label>
+      <input id="brush-size" type="range" min="2" max="40" value="8" />
+    </div>
+
+    <div class="tool-buttons">
+      <button id="tool-pen" class="tool-btn active" title="Pinceau">🖌️</button>
+      <button id="tool-eraser" class="tool-btn" title="Gomme">🧽</button>
+      <button id="btn-undo" class="tool-btn" title="Annuler">↩️</button>
+      <button id="btn-clear" class="tool-btn" title="Tout effacer">🗑️</button>
+    </div>
+  </div>
+
+  <button id="btn-submit-drawing" class="btn btn-primary btn-big submit-drawing-btn">✅ Valider mon dessin</button>
+</section>
+
+<!-- ===================== ECRAN : TOUR DE DESCRIPTION (texte) ===================== -->
+<section id="screen-describe" class="screen">
+  <div class="card center-card">
+    <div class="drawing-topbar" style="justify-content:center;">
+      <div class="timer-pill" id="describe-timer">45</div>
+      <div class="round-pill" id="describe-round-label">Tour 2/4</div>
+    </div>
+    <h2>📝 Décris ce dessin en quelques mots</h2>
+    <p class="hint">Ta description sera donnée (sans l'image) au joueur suivant, qui devra la dessiner !</p>
+    <img id="describe-image" class="describe-image" alt="Dessin à décrire" />
+    <textarea id="describe-textarea" class="text-input describe-textarea" maxlength="140" placeholder="Ex: un chat qui fait du skateboard sur la lune…"></textarea>
+    <p class="hint" id="describe-char-count">0/140</p>
+    <button id="btn-submit-description" class="btn btn-primary btn-big">✅ Valider ma description</button>
+  </div>
+</section>
+
+<!-- ===================== ECRAN : VOTE (à qui appartient cette photo ?) ===================== -->
+<section id="screen-album-vote" class="screen">
+  <div class="card center-card album-card">
+    <div class="vote-progress-label">Photo <span id="vote-index">1</span>/<span id="vote-total">1</span></div>
+    <div class="timer-pill" id="vote-timer">12</div>
+    <h2>🕵️ À qui appartient cette photo ?</h2>
+    <div id="vote-final-item" class="vote-final-item"></div>
+    <div id="vote-candidates" class="vote-candidates"></div>
+    <p id="vote-owner-hint" class="hint hidden">C'est TON album ! Les autres essaient de deviner que c'est toi… 🤫</p>
+    <p id="vote-submitted-hint" class="hint hidden">✅ Vote envoyé, en attente des autres…</p>
+  </div>
+</section>
+
+<!-- ===================== ECRAN : REVELATION DE L'ALBUM ===================== -->
+<section id="screen-album" class="screen">
+  <div class="card center-card album-card">
+    <div class="album-topbar">
+      <div class="vote-progress-label">Album <span id="album-index">1</span>/<span id="album-total">1</span></div>
+      <div class="timer-pill" id="album-timer">10</div>
+    </div>
+    <div class="reveal-owner-banner">
+      <span class="reveal-owner-confetti" aria-hidden="true">🎉</span>
+      <span id="album-owner-avatar" class="reveal-owner-avatar">🙂</span>
+      <div class="reveal-owner-text">
+        <span class="reveal-owner-kicker">C'était l'album de</span>
+        <span id="album-owner-title" class="reveal-owner-name">…</span>
+      </div>
+      <span class="reveal-owner-confetti" aria-hidden="true">🎉</span>
+    </div>
+    <ul id="album-guesser-list" class="guesser-list"></ul>
+    <div id="album-flipbook" class="album-flipbook hidden">
+      <span class="album-flipbook-badge">🎬</span>
+      <img id="album-flipbook-img" alt="Aperçu accéléré du parcours" />
+    </div>
+    <div class="album-strip-wrap">
+      <div id="album-strip" class="album-strip"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== ECRAN : SCOREBOARD ===================== -->
+<section id="screen-scoreboard" class="screen">
+  <div class="card center-card">
+    <h2>🏆 Classement final</h2>
+    <ol id="scoreboard-list" class="scoreboard-list"></ol>
+    <button id="btn-play-again" class="btn btn-primary btn-big hidden">🔁 Rejouer</button>
+    <button id="btn-back-home" class="btn btn-secondary btn-big">🏠 Accueil</button>
+  </div>
+</section>
+
+<!-- ===================== TUTORIEL ANIMÉ (comment jouer) ===================== -->
+<div id="tutorial-overlay" class="tutorial-overlay hidden">
+  <div class="tutorial-modal">
+    <button id="btn-tutorial-close" class="tutorial-close" type="button" aria-label="Fermer le tutoriel">✕</button>
+
+    <div class="tutorial-viewport">
+      <div class="tutorial-slides" id="tutorial-slides">
+
+        <div class="tutorial-slide">
+          <div class="tutorial-icon-ring ring-pink">
+            <span class="tutorial-icon icon-bounce">🎉</span>
+          </div>
+          <span class="tutorial-step-tag">Étape 1</span>
+          <h3>Crée ou rejoins une partie</h3>
+          <p>Un joueur crée un salon et obtient un code à 6 caractères. Les autres le rejoignent avec ce code. De 2 à 12 joueurs.</p>
+        </div>
+
+        <div class="tutorial-slide">
+          <div class="tutorial-icon-ring ring-yellow">
+            <span class="tutorial-icon icon-float">📸</span>
+          </div>
+          <span class="tutorial-step-tag">Étape 2</span>
+          <h3>Une photo secrète t'est tirée au sort</h3>
+          <p>Ouvre ta galerie : on pioche au hasard une de tes photos. Elle reste privée — tu peux la refuser et en retirer une autre.</p>
+        </div>
+
+        <div class="tutorial-slide">
+          <div class="tutorial-icon-ring ring-teal">
+            <span class="tutorial-icon icon-wiggle">🖌️</span>
+          </div>
+          <span class="tutorial-step-tag">Étape 3</span>
+          <h3>Redessine ce qu'on te montre</h3>
+          <p>Chaque manche, tu as un temps limité pour reproduire une photo ou un dessin reçu — parfois avec une contrainte rigolote (yeux fermés, pinceau XXL…).</p>
+        </div>
+
+        <div class="tutorial-slide">
+          <div class="tutorial-icon-ring ring-purple">
+            <span class="tutorial-icon icon-spin">🔁</span>
+          </div>
+          <span class="tutorial-step-tag">Étape 4</span>
+          <h3>La chaîne tourne entre les joueurs</h3>
+          <p>Comme un téléphone arabe, mais en dessin : ton dessin part chez un autre joueur, qui redessine à son tour ce qu'il reçoit, et ainsi de suite.</p>
+        </div>
+
+        <div class="tutorial-slide">
+          <div class="tutorial-icon-ring ring-green">
+            <span class="tutorial-icon icon-pulse">🕵️</span>
+          </div>
+          <span class="tutorial-step-tag">Étape 5</span>
+          <h3>Devine à qui appartient chaque album</h3>
+          <p>À la fin, chaque chaîne complète est révélée. Devine qui a démarré cet album avec sa photo — bonus de points à la clé !</p>
+        </div>
+
+        <div class="tutorial-slide">
+          <div class="tutorial-icon-ring ring-orange">
+            <span class="tutorial-icon icon-glow">🏆</span>
+          </div>
+          <span class="tutorial-step-tag">Étape 6</span>
+          <h3>Découvre le classement</h3>
+          <p>Points de participation, bonnes devinettes, votes qualité… Le classement final révèle qui a le mieux transmis (ou le plus fait rire) !</p>
+        </div>
+
+      </div>
+    </div>
+
+    <div id="tutorial-dots" class="tutorial-dots"></div>
+
+    <div class="tutorial-nav">
+      <button id="btn-tutorial-prev" class="btn btn-secondary tutorial-nav-btn" type="button">⬅️ Précédent</button>
+      <button id="btn-tutorial-next" class="btn btn-primary tutorial-nav-btn" type="button">Suivant ➡️</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== OVERLAY : ROULETTE DE MODE (début de manche, si plusieurs modes actifs) ===================== -->
+<div id="mode-roulette" class="mode-roulette hidden" aria-hidden="true">
+  <div class="mode-roulette-card">
+    <div id="mode-roulette-label" class="mode-roulette-label">🎲 Mode du tour…</div>
+    <div id="mode-roulette-wheel-wrap" class="mode-roulette-wheel-wrap">
+      <div class="mode-roulette-pointer" id="mode-roulette-pointer"></div>
+      <div id="mode-roulette-wheel" class="mode-roulette-wheel">
+        <div id="mode-roulette-slices" class="mode-roulette-slices"></div>
+      </div>
+      <div class="mode-roulette-hub">🎲</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== OVERLAY : RÉVÉLATION IMPOSTEUR (début de manche) ===================== -->
+<div id="impostor-reveal" class="impostor-reveal hidden" aria-hidden="true">
+  <span id="impostor-reveal-text" class="impostor-reveal-text"></span>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="net.js?v=6"></script>
+<script src="host-logic.js?v=6"></script>
+<script src="app.js?v=6"></script>
+</body>
+</html>
