@@ -454,6 +454,63 @@ h2 { font-size: 1.4rem; }
 }
 #draw-canvas { width: 100%; height: 100%; display: block; touch-action: none; transform-origin: 50% 50%; will-change: transform; }
 
+/* ---------------------- Mode "Cadavre exquis photo" ---------------------- */
+.corpse-grid {
+  width: 100%;
+  max-width: 640px;
+  aspect-ratio: 1/1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.corpse-cell {
+  position: relative;
+  border: 3px solid var(--ink);
+  border-radius: var(--radius-md);
+  background-color: #fff;
+  background-size: cover;
+  background-position: center;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.corpse-cell.pending {
+  background-image: repeating-linear-gradient(45deg, #eee, #eee 8px, #f5f2e6 8px, #f5f2e6 16px);
+}
+.corpse-cell.pending::after { content: "⏳"; font-size: 1.6rem; opacity: .5; }
+.corpse-cell.done { background-color: var(--paper); }
+.corpse-cell.done::after { content: "✅"; font-size: 1.6rem; opacity: .55; }
+.corpse-cell.active {
+  border-color: var(--purple);
+  border-width: 4px;
+  padding: 0;
+}
+/* Indice de jonction : seule une fine bande près du bord commun est visible,
+   le reste du quart voisin déjà dessiné reste caché (pas d'aveuglement global,
+   juste de quoi raccorder visuellement les traits). */
+.corpse-cell.reveal-right::after,
+.corpse-cell.reveal-bottom::after { content: none; }
+.corpse-cell.reveal-right {
+  -webkit-mask-image: linear-gradient(to left, #000 0%, #000 22%, transparent 55%);
+  mask-image: linear-gradient(to left, #000 0%, #000 22%, transparent 55%);
+}
+.corpse-cell.reveal-bottom {
+  -webkit-mask-image: linear-gradient(to top, #000 0%, #000 22%, transparent 55%);
+  mask-image: linear-gradient(to top, #000 0%, #000 22%, transparent 55%);
+}
+.corpse-cell.active .canvas-wrap {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  aspect-ratio: auto;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+
 .toolbox {
   width: 100%;
   max-width: 640px;

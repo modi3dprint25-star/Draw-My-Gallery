@@ -320,6 +320,21 @@ document.querySelectorAll("#special-options .mode-card[data-toggle]").forEach((c
       socket.emit("update_settings", { constrainedDescription: !(state.room?.settings?.constrainedDescription) });
       return;
     }
+    if (key === "corpseMode") {
+      // Exception : exclusif avec la chaîne (description/imposteur/retour en
+      // arrière), mais PAS avec le vote qualité qui reste utilisable (coup de
+      // cœur sur les quarts). Pas de EXCLUSIVE_EFFECT_KEYS ici.
+      const turningOn = !(state.room?.settings?.corpseMode);
+      const payload = { corpseMode: turningOn };
+      if (turningOn) {
+        payload.descriptionMode = false;
+        payload.impostorMode = false;
+        payload.loopbackMode = false;
+        payload.constrainedDescription = false;
+      }
+      socket.emit("update_settings", payload);
+      return;
+    }
     const turningOn = !(state.room?.settings?.[key]);
     const payload = {};
     for (const k of EXCLUSIVE_EFFECT_KEYS) payload[k] = k === key ? turningOn : false;
@@ -966,6 +981,14 @@ socket.on("phase_round_start", ({ round, roundIndex, totalRounds, type, input, v
   }
 });
 
+socket.on("phase_corpse_round_start", ({ round, roundIndex, totalRounds, quadrantIndex, sourcePhoto, neighbors, duration }) => {
+  // Réutilise exactement le pipeline "dessin" existant (currentRoundType,
+  // submitDrawing, le minuteur) : seul l'écran de mise en place change.
+  currentRoundType = "drawing";
+  currentRoundIndex = roundIndex;
+  setupCorpseDrawingRound(round, totalRounds, quadrantIndex, sourcePhoto, neighbors, duration);
+});
+
 // La référence reçue au début de la manche était parfois vide : le joueur
 // précédent avait soumis trop tard (connexion P2P lente), après l'expiration
 // du délai de grâce côté hôte. L'hôte vient de récupérer le vrai contenu et
@@ -1018,7 +1041,20 @@ const ctx = canvas.getContext("2d");
 const canvasWrap = document.getElementById("canvas-wrap");
 let drawSubmitted = false;
 
+// Mode "Cadavre exquis photo" : on déplace le VRAI #canvas-wrap (avec tout son
+// moteur de dessin déjà en place) dans la cellule active de la grille 2x2 au
+// lieu de dupliquer la logique de dessin. On garde sa position d'origine pour
+// pouvoir l'y remettre quand on repasse en mode dessin classique.
+const canvasWrapHome = { parent: canvasWrap.parentNode, next: canvasWrap.nextSibling };
+function restoreCanvasWrapHome() {
+  if (canvasWrap.parentNode !== canvasWrapHome.parent) {
+    canvasWrapHome.parent.insertBefore(canvasWrap, canvasWrapHome.next);
+  }
+  document.getElementById("corpse-grid").classList.add("hidden");
+}
+
 function setupDrawingRound(round, totalRounds, input, visualMode, duration, isImpostor, loopback) {
+  restoreCanvasWrapHome();
   state.drawing.strokes = [];
   state.drawing.currentStroke = null;
   state.drawing.mode = visualMode || "normal";
@@ -1087,6 +1123,74 @@ function setupDrawingRound(round, totalRounds, input, visualMode, duration, isIm
     swatchWrap.classList.remove("locked");
   }
   setTool("pen");
+
+  showScreen("screen-drawing");
+  setupCanvasSize();
+  startRenderLoop();
+}
+
+// quadrant en cours -> { cellIndex du voisin déjà rempli: classe CSS à appliquer }
+const CORPSE_HINT_LAYOUT = {
+  1: [{ cell: 0, side: "left", cls: "reveal-right" }],
+  2: [{ cell: 0, side: "top", cls: "reveal-bottom" }],
+  3: [{ cell: 1, side: "top", cls: "reveal-bottom" }, { cell: 2, side: "left", cls: "reveal-right" }],
+};
+
+function setupCorpseDrawingRound(round, totalRounds, quadrantIndex, sourcePhoto, neighbors, duration) {
+  state.drawing.strokes = [];
+  state.drawing.currentStroke = null;
+  state.drawing.mode = "normal"; // volontairement aucun effet spécial dans ce mode
+  state.drawing.modeStart = Date.now();
+  drawSubmitted = false;
+  canvas.style.transform = "";
+
+  document.getElementById("drawing-round-label").textContent = `Quart ${round}/${totalRounds}`;
+  document.getElementById("drawing-mode-label").textContent = "🧩 Cadavre exquis";
+  document.getElementById("drawing-timer").textContent = duration;
+  document.getElementById("btn-submit-drawing").disabled = false;
+  document.getElementById("impostor-hint").classList.add("hidden");
+  document.getElementById("blind-overlay").classList.add("hidden");
+
+  const imgWrap = document.getElementById("drawing-reference-image-wrap");
+  const textWrap = document.getElementById("drawing-reference-text-wrap");
+  textWrap.classList.add("hidden");
+  imgWrap.classList.remove("hidden");
+  imgWrap.classList.remove("mode-upside-down");
+  setImageWithFallback(document.getElementById("reference-photo"), sourcePhoto, "Image de référence indisponible");
+  document.getElementById("drawing-reference-label").textContent = "La photo complète — dessine juste ton quart";
+
+  canvasWrap.classList.remove("mode-upside-down");
+
+  const brushSlider = document.getElementById("brush-size");
+  brushSlider.disabled = false;
+  state.drawing.size = Number(brushSlider.value) || 8;
+  document.getElementById("color-picker").disabled = false;
+  swatchWrap.classList.remove("locked");
+  setTool("pen");
+
+  const grid = document.getElementById("corpse-grid");
+  grid.classList.remove("hidden");
+  const cells = Array.from(grid.querySelectorAll(".corpse-cell"));
+  cells.forEach((cell, i) => {
+    cell.className = "corpse-cell";
+    cell.style.backgroundImage = "";
+    cell.innerHTML = "";
+    if (i === quadrantIndex) {
+      cell.classList.add("active");
+      cell.appendChild(canvasWrap); // le vrai canvas de dessin vit ici pendant ce tour
+    } else if (i < quadrantIndex) {
+      cell.classList.add("done"); // déjà dessiné par quelqu'un, mais pas un voisin direct : caché
+    } else {
+      cell.classList.add("pending");
+    }
+  });
+  (CORPSE_HINT_LAYOUT[quadrantIndex] || []).forEach(({ cell, side, cls }) => {
+    const dataUrl = neighbors?.[side];
+    if (!dataUrl) return;
+    const el = cells[cell];
+    el.className = "corpse-cell " + cls;
+    el.style.backgroundImage = `url(${dataUrl})`;
+  });
 
   showScreen("screen-drawing");
   setupCanvasSize();
@@ -1651,6 +1755,86 @@ socket.on("phase_album_answer", ({ ownerName, ownerAvatar, items, votes, index, 
   // D'abord un aperçu accéléré (façon flipbook) des dessins/photos de la
   // chaîne, puis la bande complète se révèle carte par carte comme avant.
   playAlbumFlipbook(items, buildAlbumStrip);
+});
+
+// ---- Révélation "Cadavre exquis photo" : réutilise l'écran d'album (même
+// bande de cartes, mêmes étoiles de vote qualité) mais sans liste de votes
+// "à qui c'est" (trivial ici) et sans time-lapse. ----
+const CORPSE_QUAD_LABELS = ["↖️ Haut-gauche", "↗️ Haut-droite", "↙️ Bas-gauche", "↘️ Bas-droite"];
+socket.on("phase_corpse_reveal", ({ index, total, sourcePhoto, ownerName, ownerAvatar, quadrants, qualityVoteEnabled }) => {
+  document.getElementById("album-index").textContent = index;
+  document.getElementById("album-total").textContent = total;
+  document.getElementById("album-owner-avatar").textContent = ownerAvatar || "🙂";
+  document.getElementById("album-owner-title").textContent = ownerName || "?";
+  qualityVoteSubmitted = false;
+  albumStripCards = [];
+
+  const guesserList = document.getElementById("album-guesser-list");
+  guesserList.innerHTML = "";
+  const li = document.createElement("li");
+  li.className = "guesser-empty";
+  li.textContent = "🧩 Cadavre exquis — personne n'avait la vue d'ensemble en dessinant !";
+  guesserList.appendChild(li);
+  document.getElementById("album-flipbook").classList.add("hidden");
+
+  const strip = document.getElementById("album-strip");
+  strip.innerHTML = "";
+  const items = [{ label: "📸 Photo de départ", content: sourcePhoto, contributorName: "", isPhoto: true }]
+    .concat((quadrants || []).map((q, i) => ({ label: CORPSE_QUAD_LABELS[i], content: q.content, contributorName: q.contributorName })));
+
+  items.forEach((item, i) => {
+    const card = document.createElement("div");
+    card.className = "album-item" + (i % 2 === 0 ? " tilt-left" : " tilt-right");
+    card.style.setProperty("--i", i);
+    card.innerHTML = `
+      <span class="album-item-badge">${i === 0 ? "🏁" : i}</span>
+      <div class="album-item-media"></div>
+      <div class="album-item-footer">
+        <span class="album-caption-label">${item.label}</span>
+        <span class="album-caption-author">${escapeHtml(item.contributorName || "")}</span>
+      </div>
+    `;
+    const media = card.querySelector(".album-item-media");
+    const img = document.createElement("img");
+    img.alt = item.label;
+    media.appendChild(img);
+    setImageWithFallback(img, item.content, "Image indisponible");
+
+    if (qualityVoteEnabled && !item.isPhoto) {
+      const quadIndex = i - 1;
+      const starBtn = document.createElement("button");
+      starBtn.type = "button";
+      starBtn.className = "quality-star-btn";
+      starBtn.innerHTML = "⭐ Coup de cœur";
+      starBtn.addEventListener("click", () => {
+        if (qualityVoteSubmitted) return;
+        qualityVoteSubmitted = true;
+        document.querySelectorAll(".quality-star-btn").forEach((b) => (b.disabled = true));
+        starBtn.classList.add("chosen");
+        starBtn.innerHTML = "⭐ Voté !";
+        socket.emit("submit_quality_vote", { itemIndex: quadIndex }, (res) => {
+          if (!res?.ok) {
+            qualityVoteSubmitted = false;
+            document.querySelectorAll(".quality-star-btn").forEach((b) => (b.disabled = false));
+            starBtn.classList.remove("chosen");
+            starBtn.innerHTML = "⭐ Coup de cœur";
+          }
+        });
+      });
+      card.appendChild(starBtn);
+      albumStripCards[quadIndex] = card;
+    }
+    strip.appendChild(card);
+    if (i < items.length - 1) {
+      const arrow = document.createElement("div");
+      arrow.className = "album-arrow";
+      arrow.style.setProperty("--i", i);
+      arrow.innerHTML = `<span>➡️</span>`;
+      strip.appendChild(arrow);
+    }
+  });
+
+  showScreen("screen-album");
 });
 
 // ---- Time-lapse d'un dessin (carte de l'album) ----

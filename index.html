@@ -201,6 +201,14 @@
             <span class="mode-card-title">Vote qualité</span>
             <p class="mode-card-desc">À chaque révélation d'album, vote pour l'étape que tu préfères. La plus votée rapporte un bonus à son auteur.</p>
           </button>
+          <button class="mode-card mode-card-special" id="chip-corpse-mode" data-toggle="corpseMode">
+            <div class="mode-card-head">
+              <span class="mode-card-icon">🧩</span>
+              <span class="mode-card-info" role="button" tabindex="0" aria-label="Plus d'infos">i</span>
+            </div>
+            <span class="mode-card-title">Cadavre exquis photo</span>
+            <p class="mode-card-desc">Autant de canevas que de joueurs, chacun en grille 2x2. La photo complète reste affichée, tu ne dessines qu'un quart à la fois avec juste un indice sur les bords déjà remplis. Idéal à 2 joueurs ! Aucun effet spécial (yeux fermés, etc.) dans ce mode.</p>
+          </button>
         </div>
       </div>
 
@@ -256,6 +264,13 @@
   <div id="drawing-reference-text-wrap" class="reference-text-wrap hidden">
     <span class="mini-label">On t'a décrit ceci, dessine-le :</span>
     <p id="reference-text" class="reference-text"></p>
+  </div>
+
+  <div id="corpse-grid" class="corpse-grid hidden">
+    <div class="corpse-cell" data-quad="0"></div>
+    <div class="corpse-cell" data-quad="1"></div>
+    <div class="corpse-cell" data-quad="2"></div>
+    <div class="corpse-cell" data-quad="3"></div>
   </div>
 
   <div id="canvas-wrap" class="canvas-wrap">

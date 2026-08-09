@@ -116,6 +116,7 @@ const HostLogic = (() => {
         loopbackMode: room.settings.loopbackMode,
         constrainedDescription: room.settings.constrainedDescription,
         qualityVoteMode: room.settings.qualityVoteMode,
+        corpseMode: room.settings.corpseMode,
       },
       // Préférences affichées sous forme d'avatars sur les cartes du lobby :
       // uniquement indicatif, ça ne change pas les réglages réels (seul
@@ -151,7 +152,7 @@ const HostLogic = (() => {
     clearGrace();
     graceTimeoutId = setTimeout(() => {
       graceTimeoutId = null;
-      advanceRound();
+      if (room.settings.corpseMode) advanceCorpseRound(); else advanceRound();
     }, SUBMISSION_GRACE_MS);
   }
   function startTimer(seconds, phaseLabel, onComplete) {
@@ -172,6 +173,7 @@ const HostLogic = (() => {
   function destroyRoomMedia() {
     room.photos?.clear();
     room.chains?.forEach((chain) => chain.fill(null));
+    room.corpseBoards = [];
   }
 
   // ---------------- Logique de chaîne (Gartic Phone) ----------------
@@ -237,7 +239,10 @@ const HostLogic = (() => {
       case "start_game": return onStartGame(playerId);
       case "validate_photo": return onValidatePhoto(playerId, payload, cb);
       case "draw_step": return onDrawStep(playerId, payload);
-      case "submit_round_contribution": return onSubmitContribution(playerId, payload, cb);
+      case "submit_round_contribution":
+        return room?.settings?.corpseMode
+          ? onSubmitCorpseQuadrant(playerId, payload, cb)
+          : onSubmitContribution(playerId, payload, cb);
       case "submit_vote": return onSubmitVote(playerId, payload, cb);
       case "submit_quality_vote": return onSubmitQualityVote(playerId, payload, cb);
       case "leave_room": return onLeave(playerId);
@@ -262,6 +267,7 @@ const HostLogic = (() => {
         loopbackMode: false,
         constrainedDescription: false,
         qualityVoteMode: false,
+        corpseMode: false,
       },
       modeVotes: new Map(),   // playerId -> mode choisi (préférence, lobby uniquement)
       effectVotes: new Map(), // playerId -> effet spécial choisi (préférence, lobby uniquement)
@@ -272,6 +278,7 @@ const HostLogic = (() => {
       currentRound: -1,
       chains: new Map(),
       currentAssignments: new Map(),
+      corpseBoards: [], // mode "Cadavre exquis photo" : { ownerId, sourcePhoto, quadrants[4], quadrantAuthors[4] }
       revealQueue: [],
       currentRevealIndex: -1,
       revealSubPhase: null,
@@ -293,7 +300,7 @@ const HostLogic = (() => {
     broadcastRoomState();
   }
 
-  function onUpdateSettings(playerId, { drawDuration, modes, descriptionMode, impostorMode, loopbackMode, constrainedDescription, qualityVoteMode } = {}) {
+  function onUpdateSettings(playerId, { drawDuration, modes, descriptionMode, impostorMode, loopbackMode, constrainedDescription, qualityVoteMode, corpseMode } = {}) {
     if (!room || room.hostId !== playerId || room.phase !== PHASES.LOBBY) return;
     if (Number.isFinite(drawDuration)) room.settings.drawDuration = Math.min(180, Math.max(20, drawDuration));
     if (Array.isArray(modes)) {
@@ -305,6 +312,7 @@ const HostLogic = (() => {
     if (typeof loopbackMode === "boolean") room.settings.loopbackMode = loopbackMode;
     if (typeof constrainedDescription === "boolean") room.settings.constrainedDescription = constrainedDescription;
     if (typeof qualityVoteMode === "boolean") room.settings.qualityVoteMode = qualityVoteMode;
+    if (typeof corpseMode === "boolean") room.settings.corpseMode = corpseMode;
     // Un seul effet spécial exclusif actif à la fois (garde-fou côté serveur,
     // au cas où un client enverrait plusieurs booléens à true d'un coup).
     // "Description en 5 mots" est exempté : il peut se cumuler avec
@@ -320,6 +328,20 @@ const HostLogic = (() => {
       for (const k of EXCLUSIVE_EFFECT_KEYS) if (k !== justEnabled) room.settings[k] = false;
     }
     if (!room.settings.descriptionMode) room.settings.constrainedDescription = false;
+    // "Cadavre exquis photo" restructure entièrement le déroulé de la manche
+    // (canevas parallèles en grille, pas de chaîne) : incompatible avec les
+    // modes qui reposent sur la chaîne. Le vote qualité reste compatible (il
+    // est réutilisé pour le coup de cœur sur les quarts) et n'est donc PAS
+    // désactivé ici.
+    if (room.settings.corpseMode) {
+      room.settings.descriptionMode = false;
+      room.settings.impostorMode = false;
+      room.settings.loopbackMode = false;
+      room.settings.constrainedDescription = false;
+    }
+    if (descriptionMode === true || impostorMode === true || loopbackMode === true) {
+      room.settings.corpseMode = false;
+    }
     broadcastRoomState();
   }
 
@@ -383,7 +405,22 @@ const HostLogic = (() => {
     broadcastRoomState();
 
     const active = activePlayers();
-    if (active.length >= MIN_PLAYERS && active.every((p) => room.photos.has(p.id))) beginRound(0);
+    if (active.length >= MIN_PLAYERS && active.every((p) => room.photos.has(p.id))) {
+      if (room.settings.corpseMode) {
+        // Un canevas par joueur, sa photo comme référence, grille 2x2 vide.
+        room.corpseBoards = room.playerOrder.map((ownerId) => ({
+          ownerId,
+          sourcePhoto: room.photos.get(ownerId),
+          quadrants: [null, null, null, null],
+          quadrantAuthors: [null, null, null, null],
+        }));
+        room.totalRounds = 4; // grille fixe 2x2 : toujours 4 manches, quel que soit le nb de joueurs
+        room.currentRound = -1;
+        beginCorpseRound(0);
+      } else {
+        beginRound(0);
+      }
+    }
   }
 
   function onDrawStep(playerId, stroke) {
@@ -472,6 +509,167 @@ const HostLogic = (() => {
     if (done) { clearTimer(); advanceRound(); }
   }
 
+  // ---------------- Mode "Cadavre exquis photo" ----------------
+  // Autant de canevas que de joueurs, chacun en grille 2x2 (haut-gauche,
+  // haut-droite, bas-gauche, bas-droite). Ordre de remplissage FIXE et
+  // IDENTIQUE sur tous les canevas : la manche N remplit toujours le quart N
+  // sur chaque canevas — seul le joueur assigné à chaque canevas change d'une
+  // manche à l'autre (rotation réutilisant chainIndexForPlayer, comme la
+  // chaîne classique). Volontairement pas d'effets visuels (blind, tête à
+  // l'envers, etc.) dans ce mode : ils compliqueraient les indices de
+  // jonction pour peu d'intérêt, donc chaque manche tourne en mode "normal".
+  const CORPSE_NEIGHBOR_MAP = {
+    // quadrantIndex en cours de dessin -> { top / left: index du quart voisin déjà rempli }
+    1: { left: 0 },        // haut-droite voit son voisin gauche (haut-gauche)
+    2: { top: 0 },         // bas-gauche voit son voisin haut (haut-gauche)
+    3: { top: 1, left: 2 }, // bas-droite voit ses voisins haut ET gauche
+  };
+
+  function neighborHintsForBoard(board, quadrantIndex) {
+    const map = CORPSE_NEIGHBOR_MAP[quadrantIndex];
+    if (!map) return null;
+    const hints = {};
+    if (map.top != null && board.quadrants[map.top]) hints.top = board.quadrants[map.top];
+    if (map.left != null && board.quadrants[map.left]) hints.left = board.quadrants[map.left];
+    return hints;
+  }
+
+  function beginCorpseRound(round) {
+    room.phase = PHASES.ROUND;
+    room.currentRound = round;
+    const order = room.playerOrder;
+    const n = order.length;
+    const assignments = new Map();
+    order.forEach((playerId, idx) => {
+      const player = room.players.get(playerId);
+      if (!player || !player.connected) return;
+      const boardIndex = chainIndexForPlayer(idx, round, n);
+      assignments.set(playerId, { boardIndex, quadrantIndex: round });
+    });
+    room.currentAssignments = assignments;
+
+    for (const [playerId, a] of assignments.entries()) {
+      const board = room.corpseBoards[a.boardIndex];
+      Net.sendTo(playerId, "phase_corpse_round_start", {
+        round: round + 1,
+        roundIndex: round,
+        totalRounds: room.totalRounds,
+        quadrantIndex: a.quadrantIndex,
+        sourcePhoto: board.sourcePhoto,
+        neighbors: neighborHintsForBoard(board, a.quadrantIndex),
+        duration: room.settings.drawDuration,
+      });
+    }
+    broadcastRoomState();
+    startTimer(room.settings.drawDuration, "round", () => scheduleRoundFinalization());
+  }
+
+  function onSubmitCorpseQuadrant(playerId, { content, round } = {}, cb) {
+    if (!room || room.phase !== PHASES.ROUND) return cb?.({ ok: false });
+    const order = room.playerOrder;
+    const idx = order.indexOf(playerId);
+    if (idx === -1) return cb?.({ ok: false });
+
+    const targetRound = Number.isInteger(round) && round >= 0 && round < room.totalRounds
+      ? round
+      : room.currentRound;
+
+    const boardIndex = chainIndexForPlayer(idx, targetRound, order.length);
+    const board = room.corpseBoards[boardIndex];
+    if (!board) return cb?.({ ok: false });
+
+    const existing = board.quadrants[targetRound];
+    const existingAuto = board.quadrantAuthors[targetRound]?.auto;
+    if (existing != null && !existingAuto) return cb?.({ ok: false });
+
+    board.quadrants[targetRound] = String(content || "");
+    board.quadrantAuthors[targetRound] = { contributorId: playerId };
+
+    const player = room.players.get(playerId);
+    if (player) player.score += PARTICIPATION_POINTS;
+
+    cb?.({ ok: true });
+    broadcastRoomState();
+
+    if (targetRound !== room.currentRound) return; // manche déjà terminée, rien d'autre à faire
+
+    const active = activePlayers();
+    const done = active.every((p) => {
+      const a = room.currentAssignments.get(p.id);
+      return !a || room.corpseBoards[a.boardIndex].quadrants[room.currentRound] != null;
+    });
+    if (done) { clearTimer(); advanceCorpseRound(); }
+  }
+
+  function advanceCorpseRound() {
+    clearGrace();
+    for (const [playerId, a] of room.currentAssignments.entries()) {
+      const board = room.corpseBoards[a.boardIndex];
+      if (board.quadrants[room.currentRound] == null) {
+        console.warn(
+          `[host-logic] Cadavre exquis, manche ${room.currentRound + 1} : soumission absente à temps pour ` +
+          `${room.players.get(playerId)?.name || playerId} (canevas ${a.boardIndex}) — quart vide posé.`
+        );
+        board.quadrants[room.currentRound] = "";
+        board.quadrantAuthors[room.currentRound] = { contributorId: playerId, auto: true };
+      }
+    }
+    const next = room.currentRound + 1;
+    if (next >= room.totalRounds) beginCorpseReveal(); else beginCorpseRound(next);
+  }
+
+  function beginCorpseReveal() {
+    room.phase = PHASES.REVEAL;
+    room.revealQueue = room.corpseBoards.map((_, i) => i);
+    room.currentRevealIndex = -1;
+    broadcastRoomState();
+    advanceToNextCorpseBoard();
+  }
+
+  function advanceToNextCorpseBoard() {
+    room.currentRevealIndex += 1;
+    if (room.currentRevealIndex >= room.revealQueue.length) return beginScoreboard();
+    beginCorpseBoardReveal();
+  }
+
+  /** Révèle un canevas : la photo source à côté du montage des 4 quarts. Pas de vote "à qui c'est" (trivial ici) — seulement un vote qualité optionnel sur le quart préféré. */
+  function beginCorpseBoardReveal() {
+    clearTimer();
+    room.revealSubPhase = "answer"; // réutilise la même garde que onSubmitQualityVote (mode chaîne)
+    room.currentQualityVotes = new Map();
+    const boardIndex = room.revealQueue[room.currentRevealIndex];
+    const board = room.corpseBoards[boardIndex];
+    const owner = room.players.get(board.ownerId);
+
+    const quadrants = board.quadrants.map((content, i) => {
+      const contributorId = board.quadrantAuthors[i]?.contributorId;
+      return {
+        content,
+        contributorId,
+        contributorName: room.players.get(contributorId)?.name,
+      };
+    });
+
+    const qualityVoteEnabled = !!room.settings.qualityVoteMode;
+
+    Net.broadcast("phase_corpse_reveal", {
+      index: room.currentRevealIndex + 1,
+      total: room.revealQueue.length,
+      sourcePhoto: board.sourcePhoto,
+      ownerName: owner?.name,
+      ownerAvatar: owner?.avatar,
+      quadrants,
+      qualityVoteEnabled,
+    });
+    broadcastRoomState();
+
+    const duration = qualityVoteEnabled ? ALBUM_REVEAL_DURATION_SEC_QUALITY_VOTE : ALBUM_REVEAL_DURATION_SEC;
+    startTimer(duration, "reveal_answer", () => {
+      if (qualityVoteEnabled) tallyQualityVotes(quadrants);
+      advanceToNextCorpseBoard();
+    });
+  }
+
   function onLeave(playerId) {
     if (!room) return;
     const player = room.players.get(playerId);
@@ -494,11 +692,19 @@ const HostLogic = (() => {
 
     if (room.phase === PHASES.ROUND) {
       const active = activePlayers();
-      const done = active.every((p) => {
-        const a = room.currentAssignments.get(p.id);
-        return !a || room.chains.get(a.chainIndex)[room.currentRound];
-      });
-      if (done) { clearTimer(); advanceRound(); }
+      if (room.settings.corpseMode) {
+        const done = active.every((p) => {
+          const a = room.currentAssignments.get(p.id);
+          return !a || room.corpseBoards[a.boardIndex].quadrants[room.currentRound] != null;
+        });
+        if (done) { clearTimer(); advanceCorpseRound(); }
+      } else {
+        const done = active.every((p) => {
+          const a = room.currentAssignments.get(p.id);
+          return !a || room.chains.get(a.chainIndex)[room.currentRound];
+        });
+        if (done) { clearTimer(); advanceRound(); }
+      }
     }
 
     if (room.phase === PHASES.REVEAL && room.revealSubPhase === "vote") {
@@ -515,6 +721,7 @@ const HostLogic = (() => {
     room.phase = PHASES.LOBBY;
     room.photos.clear();
     room.chains.clear();
+    room.corpseBoards = [];
     room.currentAssignments.clear();
     room.playerOrder = [];
     room.currentRound = -1;
