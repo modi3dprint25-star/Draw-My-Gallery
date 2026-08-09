@@ -1308,6 +1308,46 @@ function renderCanvas(opts = {}) {
   }
 }
 
+// ---- Capture des traits pour le time-lapse affiché à la révélation ----
+// On envoie, en plus de l'image finale, une version compacte et vectorielle
+// des traits (position normalisée 0..1 + horodatage relatif) pour pouvoir
+// rejouer le dessin "en train de se faire" côté album, sans avoir à
+// transmettre une suite d'images (bien plus lourd).
+const TIMELAPSE_MAX_POINTS_PER_STROKE = 40;
+
+function subsamplePoints(points, maxPoints) {
+  if (points.length <= maxPoints) return points;
+  const out = [];
+  for (let i = 0; i < maxPoints; i++) {
+    const idx = Math.round((i * (points.length - 1)) / (maxPoints - 1));
+    out.push(points[idx]);
+  }
+  return out;
+}
+
+/** Construit un payload compact des traits du dessin en cours, prêt à envoyer. */
+function buildTimelapsePayload() {
+  const rect = canvasWrap.getBoundingClientRect();
+  const rw = Math.round(rect.width) || 1;
+  const rh = Math.round(rect.height) || 1;
+  const t0 = state.drawing.modeStart || Date.now();
+
+  const strokes = state.drawing.strokes
+    .filter((s) => s.points.length > 0)
+    .map((s) => ({
+      c: s.color,
+      s: Math.round((s.size / rw) * 1000) / 1000,
+      e: s.tool === "eraser" ? 1 : 0,
+      p: subsamplePoints(s.points, TIMELAPSE_MAX_POINTS_PER_STROKE).map((p) => [
+        Math.round((p.x / rw) * 1000) / 1000,
+        Math.round((p.y / rh) * 1000) / 1000,
+        Math.max(0, (p.ts || t0) - t0),
+      ]),
+    }));
+
+  return { rw, rh, strokes };
+}
+
 document.getElementById("btn-submit-drawing").addEventListener("click", () => {
   if (drawSubmitted) return;
   drawSubmitted = true;
@@ -1319,7 +1359,8 @@ document.getElementById("btn-submit-drawing").addEventListener("click", () => {
   // Sur un écran haute résolution (devicePixelRatio élevé), un PNG brut du canvas
   // peut peser plusieurs Mo : on le compresse pour fiabiliser l'envoi P2P.
   const dataUrl = canvasToSafeDataUrl(canvas, 900, 0.85, 700 * 1024);
-  socket.emit("submit_round_contribution", { content: dataUrl, round: currentRoundIndex }, (res) => {
+  const timelapse = buildTimelapsePayload();
+  socket.emit("submit_round_contribution", { content: dataUrl, round: currentRoundIndex, strokes: timelapse }, (res) => {
     if (!res?.ok) {
       toast("Erreur d'envoi du dessin, réessaie.");
       drawSubmitted = false;
@@ -1521,6 +1562,21 @@ socket.on("phase_album_answer", ({ ownerName, ownerAvatar, items, votes, index, 
       const media = card.querySelector(".album-item-media");
       if (item.type === "description") {
         media.innerHTML = `<div class="album-text">"${escapeHtml(item.content || "…")}"</div>`;
+      } else if (item.type === "drawing" && item.strokes && item.strokes.strokes && item.strokes.strokes.length) {
+        // Dessin avec traits capturés : on rejoue un petit time-lapse au lieu
+        // d'afficher directement l'image finale, puis on la remplace en douceur
+        // par l'image finale (nette) une fois le time-lapse terminé.
+        const tlCanvas = document.createElement("canvas");
+        tlCanvas.className = "album-item-timelapse";
+        media.appendChild(tlCanvas);
+        const revealDelayMs = i * 120 + 420; // suit le délai d'apparition CSS de la carte (--i)
+        playDrawingTimelapse(tlCanvas, item.strokes, revealDelayMs, () => {
+          const img = document.createElement("img");
+          img.alt = label;
+          img.className = "album-item-fade-in";
+          setImageWithFallback(img, item.content, "Image indisponible");
+          media.replaceChild(img, tlCanvas);
+        });
       } else {
         const img = document.createElement("img");
         img.alt = label;
@@ -1574,6 +1630,101 @@ socket.on("phase_album_answer", ({ ownerName, ownerAvatar, items, votes, index, 
   // chaîne, puis la bande complète se révèle carte par carte comme avant.
   playAlbumFlipbook(items, buildAlbumStrip);
 });
+
+// ---- Time-lapse d'un dessin (carte de l'album) ----
+// Rejoue les traits capturés pendant le tour de dessin, à vitesse accélérée,
+// dans un petit <canvas>, pour montrer le dessin "en train de se faire"
+// plutôt que de balancer directement l'image finale.
+const TIMELAPSE_PLAYBACK_MS = 2200;
+const TIMELAPSE_MAX_CANVAS_DIM = 420;
+
+function playDrawingTimelapse(canvasEl, payload, delayMs, onDone) {
+  const strokes = payload.strokes || [];
+  const rw = payload.rw || 1;
+  const rh = payload.rh || 1;
+
+  let baseW = rw, baseH = rh;
+  if (Math.max(baseW, baseH) > TIMELAPSE_MAX_CANVAS_DIM) {
+    const f = TIMELAPSE_MAX_CANVAS_DIM / Math.max(baseW, baseH);
+    baseW *= f; baseH *= f;
+  }
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvasEl.width = Math.max(1, Math.round(baseW * dpr));
+  canvasEl.height = Math.max(1, Math.round(baseH * dpr));
+  const c2d = canvasEl.getContext("2d");
+  c2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // On étale la durée réelle du dessin (potentiellement plusieurs dizaines de
+  // secondes) sur TIMELAPSE_PLAYBACK_MS, en ignorant le temps d'inaction avant
+  // le tout premier trait (sinon le time-lapse commence par un long vide).
+  let minDt = Infinity, maxDt = 0;
+  for (const s of strokes) {
+    for (const p of s.p) {
+      if (p[2] < minDt) minDt = p[2];
+      if (p[2] > maxDt) maxDt = p[2];
+    }
+  }
+  if (!isFinite(minDt)) minDt = 0;
+  const span = Math.max(300, maxDt - minDt);
+  const speed = TIMELAPSE_PLAYBACK_MS / span;
+
+  function drawFrame(elapsed) {
+    c2d.clearRect(0, 0, baseW, baseH);
+    c2d.fillStyle = "#ffffff";
+    c2d.fillRect(0, 0, baseW, baseH);
+    for (const s of strokes) {
+      const pts = s.p.filter((p) => (p[2] - minDt) * speed <= elapsed);
+      if (pts.length === 0) continue;
+      c2d.save();
+      c2d.lineJoin = "round";
+      c2d.lineCap = "round";
+      c2d.lineWidth = Math.max(0.5, s.s * baseW);
+      if (s.e) {
+        c2d.globalCompositeOperation = "destination-out";
+        c2d.strokeStyle = "rgba(0,0,0,1)";
+      } else {
+        c2d.globalCompositeOperation = "source-over";
+        c2d.strokeStyle = s.c;
+      }
+      c2d.beginPath();
+      c2d.moveTo(pts[0][0] * baseW, pts[0][1] * baseH);
+      for (let k = 1; k < pts.length; k++) c2d.lineTo(pts[k][0] * baseW, pts[k][1] * baseH);
+      if (pts.length === 1) c2d.lineTo(pts[0][0] * baseW + 0.1, pts[0][1] * baseH + 0.1);
+      c2d.stroke();
+      c2d.restore();
+    }
+  }
+
+  let rafId = null;
+  let startTs = null;
+  let finished = false;
+  function finish() {
+    if (finished) return;
+    finished = true;
+    onDone?.();
+  }
+  function loop(ts) {
+    // Si la carte a été retirée du DOM avant la fin (ex. manche suivante
+    // lancée très vite), on n'anime pas dans le vide.
+    if (!canvasEl.isConnected) return;
+    if (startTs === null) startTs = ts;
+    const elapsed = ts - startTs;
+    drawFrame(elapsed);
+    if (elapsed < TIMELAPSE_PLAYBACK_MS) {
+      rafId = requestAnimationFrame(loop);
+    } else {
+      finish();
+    }
+  }
+
+  drawFrame(0);
+  const timeoutId = setTimeout(() => {
+    if (!canvasEl.isConnected) return;
+    rafId = requestAnimationFrame(loop);
+  }, Math.max(0, delayMs || 0));
+
+  return () => { clearTimeout(timeoutId); cancelAnimationFrame(rafId); };
+}
 
 // Défile rapidement à travers les images (dessins/photos, pas les
 // descriptions texte) de la chaîne avant la révélation détaillée, façon

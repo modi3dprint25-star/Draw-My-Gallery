@@ -47,6 +47,34 @@ function sanitizeText(text) {
 function clampToWords(text, maxWords) {
   return String(text || "").trim().split(/\s+/).filter(Boolean).slice(0, maxWords).join(" ");
 }
+// Le payload "time-lapse" (traits du dessin, pour le rejouer à la révélation)
+// vient d'un autre navigateur (potentiellement pas le nôtre) : on le
+// nettoie/borne défensivement avant de le stocker et de le rediffuser, comme
+// pour tout contenu reçu d'un invité.
+const TIMELAPSE_MAX_STROKES = 600;
+const TIMELAPSE_MAX_POINTS_PER_STROKE = 60;
+function clampNum(n, min, max, fallback) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.min(max, Math.max(min, v));
+}
+function sanitizeStrokes(strokes) {
+  if (!strokes || typeof strokes !== "object" || !Array.isArray(strokes.strokes)) return null;
+  const rw = clampNum(strokes.rw, 1, 20000, 1);
+  const rh = clampNum(strokes.rh, 1, 20000, 1);
+  const cleanStrokes = strokes.strokes.slice(0, TIMELAPSE_MAX_STROKES).map((s) => {
+    const pts = Array.isArray(s?.p) ? s.p.slice(0, TIMELAPSE_MAX_POINTS_PER_STROKE) : [];
+    return {
+      c: typeof s?.c === "string" ? s.c.slice(0, 20) : "#1a1a1a",
+      s: clampNum(s?.s, 0, 2, 0.02),
+      e: s?.e ? 1 : 0,
+      p: pts
+        .filter((p) => Array.isArray(p) && p.length >= 3)
+        .map((p) => [clampNum(p[0], -1, 2, 0), clampNum(p[1], -1, 2, 0), clampNum(p[2], 0, 600000, 0)]),
+    };
+  }).filter((s) => s.p.length > 0);
+  return { rw, rh, strokes: cleanStrokes };
+}
 function shuffle(arr) {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -363,7 +391,7 @@ const HostLogic = (() => {
     Net.broadcastExcept(playerId, "draw_step_broadcast", { contributorId: playerId, stroke });
   }
 
-  function onSubmitContribution(playerId, { content, round } = {}, cb) {
+  function onSubmitContribution(playerId, { content, round, strokes } = {}, cb) {
     if (!room || room.phase !== PHASES.ROUND) return cb?.({ ok: false });
 
     const order = room.playerOrder;
@@ -410,6 +438,9 @@ const HostLogic = (() => {
       content: cleanContent,
       impostor: !!assignment?.isImpostor,
       loopback: !!assignment?.loopback,
+      // Traits vectoriels du dessin, uniquement pour les manches de dessin :
+      // permet de rejouer un time-lapse à la révélation de l'album.
+      strokes: type === "drawing" ? sanitizeStrokes(strokes) : undefined,
     };
 
     const player = room.players.get(playerId);
@@ -634,6 +665,7 @@ const HostLogic = (() => {
         contributorName: contributor?.name,
         impostor: !!entry.impostor,
         loopback: !!entry.loopback,
+        strokes: entry.type === "drawing" ? entry.strokes || null : undefined,
       });
     });
 

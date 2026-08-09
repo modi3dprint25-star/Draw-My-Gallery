@@ -921,6 +921,20 @@ h2 { font-size: 1.4rem; }
   object-fit: contain;
   background: #f4f4f4;
 }
+.album-item-timelapse {
+  display: block;
+  width: 100%;
+  height: 150px;
+  object-fit: contain;
+  background: #f4f4f4;
+}
+.album-item img.album-item-fade-in {
+  animation: albumImgFadeIn 0.25s ease both;
+}
+@keyframes albumImgFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 .album-item .album-text {
   height: 150px;
   display: flex;
