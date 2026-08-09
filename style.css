@@ -1279,10 +1279,8 @@ h2 { font-size: 1.4rem; }
   inset: 0;
   z-index: 550;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  padding-top: 8vh;
-  overflow: hidden;
   background: rgba(20, 14, 40, 0);
   transition: background 0.35s ease;
   pointer-events: none;
@@ -1313,124 +1311,110 @@ h2 { font-size: 1.4rem; }
   text-align: center;
 }
 
-/* ---- Vraie roue circulaire ---- */
-/* Grande roue qui déborde volontairement en bas de l'écran (coupée par le
-   bord de l'overlay) et vient chevaucher légèrement le bas de la carte
-   d'étiquette au-dessus, comme une vraie roue de loterie géante. */
-.mode-roulette-wheel-wrap {
+/* ---- Bande façon machine à sous / roulette de casino ---- */
+/* Une bande horizontale de cases colorées défile derrière une fenêtre
+   fixe et vient se caler pile sous le repère central (haut + bas), comme
+   les bandeaux d'un vrai bandit-manchot. Beaucoup plus simple (et fiable)
+   qu'une roue qui tourne : une seule translation X, calculée une seule
+   fois, donc aucun risque de désync entre le mode affiché et la case sur
+   laquelle la bande s'arrête réellement. */
+.mode-roulette-strip-viewport {
   position: relative;
-  width: min(150vw, 480px);
-  height: min(150vw, 480px);
-  margin-top: -22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Pointeur fixe en haut de la roue, qui indique la case gagnante — et
-   qui "clique" (petit flap) à chaque case qui passe dessous pendant que
-   la roue tourne, comme le cliquet d'une vraie roue de loterie. */
-.mode-roulette-pointer {
-  position: absolute;
-  top: -8px;
-  left: 50%;
-  width: 0;
-  height: 0;
-  border-left: 15px solid transparent;
-  border-right: 15px solid transparent;
-  border-top: 24px solid var(--red);
-  z-index: 5;
-  filter: drop-shadow(0 2px 0 var(--shadow-ink));
-  transform: translateX(-50%) rotate(0deg);
-  transform-origin: 50% 0%; /* pivot en haut, comme un cliquet articulé */
-}
-@keyframes modeRoulettePointerClick {
-  0%   { transform: translateX(-50%) rotate(0deg); }
-  30%  { transform: translateX(-50%) rotate(20deg); }
-  100% { transform: translateX(-50%) rotate(0deg); }
-}
-.mode-roulette-pointer.clicking {
-  animation: modeRoulettePointerClick 0.12s ease-out;
-}
-
-.mode-roulette-wheel {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  border: 5px solid var(--ink);
-  box-shadow: 6px 6px 0 var(--shadow-ink), 0 0 0 6px var(--paper);
-  background: var(--paper-alt);
+  width: min(88vw, 380px);
+  height: 104px;
   overflow: hidden;
-  will-change: transform;
+  border: 5px solid var(--ink);
+  border-radius: var(--radius-md, 14px);
+  background: var(--paper-alt);
+  box-shadow: 6px 6px 0 var(--shadow-ink);
   transition: box-shadow 0.25s ease;
-  z-index: 2;
 }
 
-.mode-roulette-slices {
+/* Repère central fixe (ne bouge jamais) : la case qui s'arrête pile
+   dessous est le résultat — et c'est aussi elle qu'on lit dans le
+   libellé au-dessus, à partir de la MÊME variable JS, donc les deux ne
+   peuvent pas se désynchroniser. */
+.mode-roulette-strip-viewport::after {
+  content: "";
   position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  z-index: 3;
-}
-
-/* Flou de vitesse sur les icônes pendant que la roue tourne vite : elles
-   se "délavent" au démarrage puis redeviennent nettes en ralentissant,
-   comme des dessins qui défilent trop vite pour être vus. */
-@keyframes rouletteIconSpeedBlur {
-  0%   { filter: blur(5.5px); }
-  10%  { filter: blur(5.5px); }
-  55%  { filter: blur(2px); }
-  85%  { filter: blur(0.5px); }
-  100% { filter: blur(0); }
-}
-.mode-roulette-slices.spinning {
-  animation: rouletteIconSpeedBlur var(--roulette-spin-ms, 3200ms) ease-out forwards;
-}
-
-/* Étiquette (icône) d'une case : positionnée au centre puis poussée le
-   long du rayon déjà tourné (voir JS), comme les numéros d'une vraie
-   roulette qui restent radiaux. */
-.mode-roulette-slice-label {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-}
-.mode-roulette-slice-inner {
-  position: absolute;
-  left: 0;
   top: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.7rem;
-  line-height: 1;
-  filter: drop-shadow(1px 1px 0 var(--shadow-ink));
-}
-
-/* Moyeu central fixe (ne tourne pas avec la roue). */
-.mode-roulette-hub {
-  position: absolute;
-  top: 50%;
+  bottom: 0;
   left: 50%;
-  transform: translate(-50%, -50%);
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  background: var(--paper);
-  border: 4px solid var(--ink);
-  box-shadow: 2px 2px 0 var(--shadow-ink);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.3rem;
+  width: var(--roulette-cell-w, 92px);
+  transform: translateX(-50%);
+  border-left: 3px dashed rgba(0, 0, 0, 0.3);
+  border-right: 3px dashed rgba(0, 0, 0, 0.3);
+  pointer-events: none;
   z-index: 4;
 }
 
+.mode-roulette-strip-pointer {
+  position: absolute;
+  left: 50%;
+  width: 0;
+  height: 0;
+  z-index: 5;
+  transform: translateX(-50%);
+  filter: drop-shadow(0 2px 0 var(--shadow-ink));
+}
+.mode-roulette-strip-pointer-top {
+  top: -3px;
+  border-left: 13px solid transparent;
+  border-right: 13px solid transparent;
+  border-top: 20px solid var(--red);
+}
+.mode-roulette-strip-pointer-bottom {
+  bottom: -3px;
+  border-left: 13px solid transparent;
+  border-right: 13px solid transparent;
+  border-bottom: 20px solid var(--red);
+}
+@keyframes modeRouletteStripPointerClick {
+  0%   { transform: translateX(-50%) scale(1); }
+  30%  { transform: translateX(-50%) scale(1.4); }
+  100% { transform: translateX(-50%) scale(1); }
+}
+.mode-roulette-strip-pointer.clicking {
+  animation: modeRouletteStripPointerClick 0.12s ease-out;
+}
+
+.mode-roulette-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  will-change: transform;
+}
+.mode-roulette-cell {
+  flex: 0 0 auto;
+  width: var(--roulette-cell-w, 92px);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-right: 3px solid var(--ink);
+  font-family: var(--font-display);
+  font-weight: 800;
+  color: var(--ink);
+}
+.mode-roulette-cell-icon {
+  font-size: 2rem;
+  line-height: 1;
+  filter: drop-shadow(1px 1px 0 var(--shadow-ink));
+}
+.mode-roulette-cell-label {
+  font-size: 0.62rem;
+  text-align: center;
+  padding: 0 4px;
+  line-height: 1.05;
+}
+
 /* ---- Halo de couleur unique par mode au moment du résultat ---- */
-.mode-roulette-wheel-wrap[class*="mode-roulette-glow-"] .mode-roulette-wheel {
+.mode-roulette-strip-viewport[class*="mode-roulette-glow-"] {
   animation: modeRouletteWheelPulse 0.9s ease-in-out 0s infinite;
 }
 .mode-roulette-glow-normal        { --roulette-glow: rgba(34, 211, 201, 0.85); }
@@ -1481,7 +1465,7 @@ h2 { font-size: 1.4rem; }
 
 @media (max-width: 480px) {
   .mode-roulette-label { font-size: 1.05rem; }
-  .mode-roulette-wheel-wrap { width: min(170vw, 420px); height: min(170vw, 420px); }
-  .mode-roulette-hub { width: 38px; height: 38px; font-size: 1.1rem; }
-  .mode-roulette-slice-inner { font-size: 1.4rem; }
+  .mode-roulette-strip-viewport { height: 92px; }
+  .mode-roulette-cell-icon { font-size: 1.6rem; }
+  .mode-roulette-cell-label { font-size: 0.56rem; }
 }

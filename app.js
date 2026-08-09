@@ -731,11 +731,11 @@ const MODE_SHORT_LABELS = {
   manege: "Manège", derive: "Dérive",
 };
 
-// ---- Roulette de mode : une VRAIE roue qui tourne façon roulette de
-// casino, au début d'une manche de dessin, uniquement quand plusieurs
-// modes sont actifs (sinon rien à tirer, pas de suspense). Se joue sur
-// l'écran de TOUS les dessinateurs, avec le MÊME résultat (tiré une
-// seule fois côté hôte).
+// ---- Roulette de mode : une bande façon "bandit-manchot" qui défile à
+// l'horizontale et vient se caler sous un repère central fixe, au début
+// d'une manche de dessin, uniquement quand plusieurs modes sont actifs
+// (sinon rien à tirer, pas de suspense). Se joue sur l'écran de TOUS les
+// dessinateurs, avec le MÊME résultat (tiré une seule fois côté hôte).
 const MODE_WHEEL_COLORS = {
   normal: "var(--teal)", blind: "var(--purple)", upside_down: "var(--pink)",
   wobbly: "var(--orange)", giant_brush: "var(--red)", mystery_color: "var(--yellow)",
@@ -751,9 +751,9 @@ function scheduleRoulette(fn, ms) {
 }
 
 // -- Reproduit en JS la même courbe cubic-bezier que la transition CSS de
-// la roue, pour savoir EXACTEMENT à quel angle elle se trouve à chaque
-// instant (sans ça, impossible de faire "cliquer" le pointeur pile au
-// passage de chaque case). Algorithme standard (Newton-Raphson). --
+// la bande, pour savoir EXACTEMENT à quelle position elle se trouve à
+// chaque instant (sans ça, impossible de faire "cliquer" le repère pile
+// au passage de chaque case). Algorithme standard (Newton-Raphson). --
 function makeCubicBezierEase(p1x, p1y, p2x, p2y) {
   const A = (a1, a2) => 1 - 3 * a2 + 3 * a1;
   const B = (a1, a2) => 3 * a2 - 6 * a1;
@@ -770,7 +770,8 @@ function makeCubicBezierEase(p1x, p1y, p2x, p2y) {
     return calc(t, p1y, p2y);
   };
 }
-const ROULETTE_EASE = makeCubicBezierEase(0.12, 0.72, 0.15, 1);
+const ROULETTE_SPIN_CSS_EASE = "cubic-bezier(0.1, 0.62, 0.14, 1)";
+const ROULETTE_EASE = makeCubicBezierEase(0.1, 0.62, 0.14, 1);
 
 // -- Petit "tic" synthétisé (aucun fichier audio requis). Best-effort :
 // si l'audio est bloqué par le navigateur (pas encore d'interaction),
@@ -794,88 +795,82 @@ function playRouletteTick() {
   } catch (e) { /* audio indisponible, tant pis */ }
 }
 
-// -- Fait "clic" le petit pointeur (comme le cliquet d'une vraie roue de
-// loterie qui tape contre chaque case). --
-function flickRoulettePointer(pointer) {
-  if (!pointer) return;
-  pointer.classList.remove("clicking");
-  void pointer.offsetWidth; // force le redémarrage de l'animation
-  pointer.classList.add("clicking");
+// -- Fait "clic" les petits repères (comme le cliquet d'une vraie machine
+// à sous qui tape contre chaque case qui défile). --
+function flickRoulettePointers(pointers) {
+  pointers.forEach((p) => {
+    p.classList.remove("clicking");
+    void p.offsetWidth; // force le redémarrage de l'animation
+    p.classList.add("clicking");
+  });
   playRouletteTick();
 }
 
 // -- Boucle qui suit (en JS, avec la même courbe d'accélération que la
-// roue) le passage de chaque séparation de case sous le pointeur pendant
-// le spin, et déclenche un "clic" à chaque fois. `spinId` permet
-// d'abandonner proprement si une nouvelle roulette démarre entre-temps. --
+// bande) la position exacte de la bande pendant le défilement, et
+// déclenche un "clic" à chaque case franchie. `spinId` permet d'abandonner
+// proprement si une nouvelle roulette démarre entre-temps. --
 let rouletteSpinCounter = 0;
-function runRouletteClicks(pointer, targetDeg, step, durationMs, spinId) {
+function runRouletteStripClicks(pointers, targetX, cellW, durationMs, spinId) {
   const start = performance.now();
   let lastCrossed = 0;
   function frame(now) {
     if (spinId !== rouletteSpinCounter) return; // une autre roulette a démarré
     const t = Math.min(1, (now - start) / durationMs);
-    const angle = ROULETTE_EASE(t) * targetDeg;
-    const crossed = Math.floor(angle / step);
+    const x = Math.abs(ROULETTE_EASE(t) * targetX);
+    const crossed = Math.floor(x / cellW);
     if (crossed > lastCrossed) {
       lastCrossed = crossed;
-      flickRoulettePointer(pointer);
+      flickRoulettePointers(pointers);
     }
     if (t < 1) requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 }
 
-// Construit les tranches colorées (dégradé conique) + les icônes
-// disposées en rayons, comme sur une vraie roue.
-function buildRouletteWheel(modesPool) {
-  const wheel = document.getElementById("mode-roulette-wheel");
-  const slices = document.getElementById("mode-roulette-slices");
+// Largeur d'une case : SEULE source de vérité, appliquée en JS à la fois
+// aux cases et au repère central (variable CSS), pour qu'il n'y ait
+// jamais de décalage possible entre la case affichée et celle sur
+// laquelle la bande s'arrête réellement.
+const ROULETTE_CELL_W = 92;
+// Nombre de fois où la liste des modes est répétée dans la bande, pour
+// qu'elle ait de quoi défiler longtemps avant de s'arrêter.
+const ROULETTE_REPEATS = 14;
+
+// Construit la bande de cases colorées (une case par mode, répétée
+// plusieurs fois) et renvoie le nombre total de cases générées.
+function buildRouletteStrip(modesPool) {
+  const strip = document.getElementById("mode-roulette-strip");
+  strip.style.setProperty("--roulette-cell-w", `${ROULETTE_CELL_W}px`);
+  document.getElementById("mode-roulette-strip-viewport")
+    .style.setProperty("--roulette-cell-w", `${ROULETTE_CELL_W}px`);
+  strip.innerHTML = "";
   const n = modesPool.length;
-  const step = 360 / n;
-
-  const colorStops = modesPool
-    .map((m, i) => `${MODE_WHEEL_COLORS[m] || "var(--purple)"} ${i * step}deg ${(i + 1) * step}deg`)
-    .join(", ");
-  // Fines lignes de séparation entre les tranches, en plus du dégradé de couleurs.
-  const dividerStops = `var(--ink) 0deg 0.6deg, transparent 0.6deg ${step}deg`;
-  wheel.style.backgroundImage =
-    `repeating-conic-gradient(from 0deg, ${dividerStops}), conic-gradient(from 0deg, ${colorStops})`;
-
-  // Rayon de placement des icônes : dépend de la taille réellement rendue.
-  const radius = wheel.getBoundingClientRect().width / 2;
-  const iconRadius = Math.max(30, radius * 0.66);
-
-  slices.innerHTML = "";
-  modesPool.forEach((m, i) => {
-    const centerAngle = i * step + step / 2;
-    const label = document.createElement("div");
-    label.className = "mode-roulette-slice-label";
-    label.style.transform = `rotate(${centerAngle}deg)`;
-    const inner = document.createElement("span");
-    inner.className = "mode-roulette-slice-inner";
-    inner.style.transform = `translate(-50%, ${-iconRadius}px)`;
-    inner.textContent = MODE_ICONS[m] || "✏️";
-    label.appendChild(inner);
-    slices.appendChild(label);
-  });
-
-  return step;
-}
-
-function setWheelRotation(wheel, deg, transitionCss) {
-  wheel.style.transition = transitionCss;
-  wheel.style.transform = `rotate(${deg}deg)`;
+  const totalCells = n * ROULETTE_REPEATS;
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < totalCells; i++) {
+    const m = modesPool[i % n];
+    const cell = document.createElement("div");
+    cell.className = "mode-roulette-cell";
+    cell.style.width = `${ROULETTE_CELL_W}px`;
+    cell.style.background = MODE_WHEEL_COLORS[m] || "var(--purple)";
+    cell.innerHTML = `
+      <span class="mode-roulette-cell-icon">${MODE_ICONS[m] || "✏️"}</span>
+      <span class="mode-roulette-cell-label">${MODE_SHORT_LABELS[m] || m}</span>
+    `;
+    frag.appendChild(cell);
+  }
+  strip.appendChild(frag);
+  return totalCells;
 }
 
 function showModeRoulette(modesPool, winningMode, onDone) {
   const overlay = document.getElementById("mode-roulette");
   const card = overlay.querySelector(".mode-roulette-card");
   const label = document.getElementById("mode-roulette-label");
-  const wheelWrap = document.getElementById("mode-roulette-wheel-wrap");
-  const wheel = document.getElementById("mode-roulette-wheel");
-  const slices = document.getElementById("mode-roulette-slices");
-  const pointer = document.getElementById("mode-roulette-pointer");
+  const viewport = document.getElementById("mode-roulette-strip-viewport");
+  const strip = document.getElementById("mode-roulette-strip");
+  const pointers = overlay.querySelectorAll(".mode-roulette-strip-pointer");
   const spinId = ++rouletteSpinCounter;
 
   clearModeRouletteTimeouts();
@@ -883,77 +878,77 @@ function showModeRoulette(modesPool, winningMode, onDone) {
   // Reset complet pour pouvoir rejouer l'animation à l'identique à chaque tour.
   overlay.className = "mode-roulette hidden";
   card.className = "mode-roulette-card";
-  wheelWrap.className = "mode-roulette-wheel-wrap";
-  pointer.classList.remove("clicking");
-  slices.classList.remove("spinning");
+  viewport.className = "mode-roulette-strip-viewport";
+  pointers.forEach((p) => p.classList.remove("clicking"));
   label.textContent = "🎲 Mode du tour…";
+  strip.style.transition = "none";
+  strip.style.transform = "translateX(0px)";
   void overlay.offsetWidth;
-
-  setWheelRotation(wheel, 0, "none");
 
   overlay.classList.remove("hidden");
   overlay.classList.add("show");
 
   // Construite une fois visible : getBoundingClientRect() a besoin que
   // l'overlay soit affiché (pas "display:none") pour donner une vraie taille.
-  const step = buildRouletteWheel(modesPool);
+  const totalCells = buildRouletteStrip(modesPool);
+  const n = modesPool.length;
+  const winningIndex = modesPool.indexOf(winningMode);
 
-  // -- 1) Entrée en tournant --
+  // On vise une occurrence du mode gagnant assez loin dans la bande (mais
+  // pas la toute dernière, pour garder de la marge derrière le point
+  // d'arrivée) — TOUJOURS calculée à partir du MÊME `winningMode` que
+  // celui affiché dans le libellé, donc les deux ne peuvent jamais diverger.
+  const targetCycle = ROULETTE_REPEATS - 3;
+  const targetCellIndex = targetCycle * n + winningIndex;
+  const viewportWidth = viewport.getBoundingClientRect().width;
+  const cellCenter = targetCellIndex * ROULETTE_CELL_W + ROULETTE_CELL_W / 2;
+  // Petit tremblement aléatoire pour ne pas toujours s'arrêter pile au
+  // centre de la case, tout en restant largement à l'intérieur (±30%).
+  const jitter = (Math.random() - 0.5) * ROULETTE_CELL_W * 0.6;
+  const targetX = -(cellCenter - viewportWidth / 2) + jitter;
+
+  // -- 1) Entrée --
   requestAnimationFrame(() => card.classList.add("mode-roulette-card-enter"));
 
-  // -- 2) Phase principale : la roue tourne vite (plusieurs tours), avec
-  // flou de vitesse sur les icônes et un clic du pointeur à chaque case
-  // qui passe dessous. Ne couvre que 90% de l'angle total. --
-  const MAIN_SPIN_MS = 3200;
-  // -- 3) Phase finale : les 10% d'angle restants, étirés sur un temps
-  // plus long avec une décélération très marquée → petite pause
-  // dramatique juste avant que le pointeur ne se pose. --
-  const FINAL_APPROACH_MS = 750;
-  const TOTAL_SPIN_MS = MAIN_SPIN_MS + FINAL_APPROACH_MS;
-  const SPIN_TURNS = 6;
+  // -- 2) Défilement : une seule translation, du début à la fin, jusqu'à
+  // la position calculée ci-dessus. Une seule transition = aucun risque
+  // qu'une deuxième étape réajuste la position sur une autre case. --
+  const SPIN_MS = 3600;
 
   scheduleRoulette(() => {
-    const winningIndex = modesPool.indexOf(winningMode);
-    const centerAngle = winningIndex * step + step / 2;
-    const jitter = (Math.random() - 0.5) * step * 0.6;
-    const targetDeg = SPIN_TURNS * 360 - (centerAngle + jitter);
-    const mainDeg = targetDeg * 0.9;
-
-    slices.style.setProperty("--roulette-spin-ms", `${MAIN_SPIN_MS}ms`);
-    slices.classList.add("spinning");
-    setWheelRotation(wheel, mainDeg, `transform ${MAIN_SPIN_MS}ms cubic-bezier(0.12, 0.72, 0.15, 1)`);
-    runRouletteClicks(pointer, mainDeg, step, MAIN_SPIN_MS, spinId);
-
-    // Enchaîne directement sur la petite approche finale, lente et
-    // silencieuse (le suspense se joue dans le ralenti, pas dans le bruit).
-    scheduleRoulette(() => {
-      setWheelRotation(wheel, targetDeg, `transform ${FINAL_APPROACH_MS}ms cubic-bezier(0.1, 0.4, 0.15, 1)`);
-    }, MAIN_SPIN_MS);
+    strip.style.transition = `transform ${SPIN_MS}ms ${ROULETTE_SPIN_CSS_EASE}`;
+    strip.style.transform = `translateX(${targetX}px)`;
+    runRouletteStripClicks(pointers, targetX, ROULETTE_CELL_W, SPIN_MS, spinId);
   }, 380);
 
-  // -- 4) Résultat : halo lumineux de la couleur du mode + pop --
+  // -- 3) Résultat : halo lumineux de la couleur du mode + pop. Le
+  // libellé réutilise `winningMode`, exactement la valeur qui a servi à
+  // calculer `targetX` juste au-dessus : ils ne peuvent pas se désynchroniser. --
   scheduleRoulette(() => {
-    wheelWrap.classList.add(`mode-roulette-glow-${winningMode}`, "mode-roulette-landed");
+    viewport.classList.add(`mode-roulette-glow-${winningMode}`, "mode-roulette-landed");
     overlay.classList.add(`mode-roulette-bg-${winningMode}`);
     label.textContent = `${MODE_ICONS[winningMode] || "✏️"} ${MODE_SHORT_LABELS[winningMode] || winningMode} !`;
-  }, 380 + TOTAL_SPIN_MS);
+  }, 380 + SPIN_MS);
 
-  // -- 5) Sortie propre --
+  // -- 4) Sortie propre --
   scheduleRoulette(() => {
     card.classList.remove("mode-roulette-landed");
+    viewport.classList.remove("mode-roulette-landed");
     card.classList.add("mode-roulette-card-exit");
     overlay.classList.add("exit");
-  }, 380 + TOTAL_SPIN_MS + 900);
+  }, 380 + SPIN_MS + 900);
 
   scheduleRoulette(() => {
     overlay.classList.add("hidden");
     overlay.className = "mode-roulette hidden";
     card.className = "mode-roulette-card";
-    wheelWrap.className = "mode-roulette-wheel-wrap";
-    slices.classList.remove("spinning");
+    viewport.className = "mode-roulette-strip-viewport";
+    strip.style.transition = "none";
+    strip.style.transform = "translateX(0px)";
     onDone?.();
-  }, 380 + TOTAL_SPIN_MS + 900 + 450);
+  }, 380 + SPIN_MS + 900 + 450);
 }
+
 
 socket.on("phase_round_start", ({ round, roundIndex, totalRounds, type, input, visualMode, modesPool, duration, isImpostor, impostorModeActive, loopback }) => {
   currentRoundType = type;
