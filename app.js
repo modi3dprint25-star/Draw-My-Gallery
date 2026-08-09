@@ -1052,6 +1052,50 @@ const ctx = canvas.getContext("2d");
 const canvasWrap = document.getElementById("canvas-wrap");
 let drawSubmitted = false;
 
+// ---- Tampon hors-écran pour la traînée du mode "🙈 Les yeux fermés" ----
+// Avant : chaque micro-segment de la traînée était peint séparément (un
+// beginPath()/stroke() par segment), chacun avec sa propre opacité qui
+// décroît avec l'âge. Deux segments consécutifs partagent un point, donc
+// leurs bouts arrondis (lineCap "round") se chevauchent — et comme ce sont
+// deux appels de dessin distincts, l'opacité se composait DEUX FOIS sur ce
+// petit disque de recouvrement. Résultat : une jonction légèrement plus
+// opaque (un petit point visible) à chaque endroit où deux segments se
+// rejoignent. Correction : chaque bout de trait n'est peint qu'UNE SEULE
+// FOIS, toujours à pleine opacité, sur un canvas tampon dédié (donc aucun
+// chevauchement double-composé possible) ; le tampon entier est ensuite
+// estompé uniformément à chaque image (un seul fillRect en
+// destination-out), ce qui donne un fondu propre, sans aucune jonction
+// visible.
+let blindTrailCanvas = null;
+let blindTrailCtx = null;
+let blindTrailLastTs = null;
+let blindTrailDrawnCount = new WeakMap(); // trait -> nb de points déjà peints dans le tampon
+
+function ensureBlindTrailCanvas() {
+  if (!blindTrailCanvas) {
+    blindTrailCanvas = document.createElement("canvas");
+    blindTrailCtx = blindTrailCanvas.getContext("2d");
+  }
+  if (blindTrailCanvas.width !== canvas.width || blindTrailCanvas.height !== canvas.height) {
+    blindTrailCanvas.width = canvas.width;
+    blindTrailCanvas.height = canvas.height;
+    const dpr = window.devicePixelRatio || 1;
+    blindTrailCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    resetBlindTrail();
+  }
+  return blindTrailCtx;
+}
+/** À appeler chaque fois que les traits changent en dehors du dessin normal
+ * (undo, clear, nouvelle manche) pour éviter qu'un trait effacé reste
+ * visible dans le tampon jusqu'à ce qu'il s'estompe tout seul. */
+function resetBlindTrail() {
+  blindTrailLastTs = null;
+  blindTrailDrawnCount = new WeakMap();
+  if (blindTrailCtx && blindTrailCanvas) {
+    blindTrailCtx.clearRect(0, 0, blindTrailCanvas.width, blindTrailCanvas.height);
+  }
+}
+
 // Mode "Cadavre exquis photo" : on déplace le VRAI #canvas-wrap (avec tout son
 // moteur de dessin déjà en place) dans la cellule active de la grille 2x2 au
 // lieu de dupliquer la logique de dessin. On garde sa position d'origine pour
@@ -1073,6 +1117,7 @@ function setupDrawingRound(round, totalRounds, input, visualMode, duration, isIm
   state.drawing.currentStroke = null;
   state.drawing.mode = visualMode || "normal";
   state.drawing.modeStart = Date.now();
+  resetBlindTrail();
   drawSubmitted = false;
   const mode = state.drawing.mode;
   // ---- Modes "🎠 Manège" / "🌊 Dérive" : la surface de dessin tourne ou
@@ -1324,8 +1369,8 @@ function setTool(tool) {
 }
 document.getElementById("tool-pen").addEventListener("click", () => setTool("pen"));
 document.getElementById("tool-eraser").addEventListener("click", () => setTool("eraser"));
-document.getElementById("btn-undo").addEventListener("click", () => { state.drawing.strokes.pop(); });
-document.getElementById("btn-clear").addEventListener("click", () => { state.drawing.strokes = []; });
+document.getElementById("btn-undo").addEventListener("click", () => { state.drawing.strokes.pop(); resetBlindTrail(); });
+document.getElementById("btn-clear").addEventListener("click", () => { state.drawing.strokes = []; resetBlindTrail(); });
 
 // ---- Modes "🎠 Manège" / "🌊 Dérive" : le <canvas> lui-même est animé via
 // CSS transform (rotation continue / glissement), pendant que canvas-wrap
@@ -1464,62 +1509,96 @@ function renderCanvas(opts = {}) {
   const allStrokes = [...state.drawing.strokes];
   if (state.drawing.currentStroke) allStrokes.push(state.drawing.currentStroke);
   const blind = state.drawing.mode === "blind" && !forceFull;
-  const now = Date.now();
 
-  for (const stroke of allStrokes) {
-    if (stroke.points.length < 1) continue;
-
-    ctx.save();
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-    ctx.lineWidth = stroke.size;
-
-    if (stroke.tool === "eraser") {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.strokeStyle = "rgba(0,0,0,1)";
-    } else {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = stroke.color;
-    }
-
-    if (!blind) {
+  if (!blind) {
+    for (const stroke of allStrokes) {
+      if (stroke.points.length < 1) continue;
+      ctx.save();
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.lineWidth = stroke.size;
+      if (stroke.tool === "eraser") {
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.strokeStyle = "rgba(0,0,0,1)";
+      } else {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = stroke.color;
+      }
       ctx.globalAlpha = 1;
       ctx.beginPath();
       ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
       for (let i = 1; i < stroke.points.length; i++) ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
       if (stroke.points.length === 1) ctx.lineTo(stroke.points[0].x + 0.1, stroke.points[0].y + 0.1);
       ctx.stroke();
-    } else {
-      // Mode "yeux fermés" : on ne dessine à l'écran qu'une petite traînée qui
-      // s'efface — chaque segment garde une opacité qui décroît avec son âge.
-      // Le tableau `strokes` en mémoire, lui, reste complet et intact : c'est
-      // bien le dessin ENTIER qui sera envoyé aux autres joueurs à la fin.
-      for (let i = 1; i < stroke.points.length; i++) {
-        const p = stroke.points[i];
-        const age = now - (p.ts || now);
-        const alpha = Math.max(0, 1 - age / BLIND_TRAIL_FADE_MS);
-        if (alpha <= 0) continue;
-        ctx.globalAlpha = alpha;
-        ctx.beginPath();
-        ctx.moveTo(stroke.points[i - 1].x, stroke.points[i - 1].y);
-        ctx.lineTo(p.x, p.y);
-        ctx.stroke();
-      }
-      if (stroke.points.length === 1) {
-        const p = stroke.points[0];
-        const age = now - (p.ts || now);
-        const alpha = Math.max(0, 1 - age / BLIND_TRAIL_FADE_MS);
-        if (alpha > 0) {
-          ctx.globalAlpha = alpha;
-          ctx.beginPath();
-          ctx.moveTo(p.x, p.y);
-          ctx.lineTo(p.x + 0.1, p.y + 0.1);
-          ctx.stroke();
-        }
-      }
+      ctx.restore();
     }
-    ctx.restore();
+    return;
   }
+
+  // ---- Mode "🙈 Les yeux fermés" : traînée qui s'efface, sans jonctions ----
+  // Le tableau `strokes` en mémoire reste complet et intact : c'est bien le
+  // dessin ENTIER qui sera envoyé aux autres joueurs à la fin (voir
+  // submitDrawing / forceFull ci-dessus). Ici on ne dessine que l'aperçu
+  // fugace affiché à l'écran pendant qu'on trace.
+  const trailCtx = ensureBlindTrailCanvas();
+  const now = performance.now();
+  const dtMs = blindTrailLastTs === null ? 0 : Math.max(0, now - blindTrailLastTs);
+  blindTrailLastTs = now;
+
+  // 1) Fondu UNIFORME de tout le tampon en un seul appel (pas de chevauchement
+  //    possible), proportionnel au temps réellement écoulé depuis l'image
+  //    précédente.
+  if (dtMs > 0) {
+    trailCtx.save();
+    trailCtx.globalCompositeOperation = "destination-out";
+    trailCtx.fillStyle = `rgba(0,0,0,${Math.min(1, dtMs / BLIND_TRAIL_FADE_MS)})`;
+    trailCtx.fillRect(0, 0, rect.width, rect.height);
+    trailCtx.restore();
+  }
+
+  // 2) Peint UNE SEULE FOIS, à pleine opacité, les points de chaque trait
+  //    apparus depuis la dernière image (jamais repeints ensuite) : comme
+  //    tout est peint à alpha=1, un éventuel chevauchement de bouts arrondis
+  //    entre deux images consécutives ne change rien visuellement — plus
+  //    aucune jonction plus opaque que le reste du trait.
+  for (const stroke of allStrokes) {
+    if (stroke.points.length < 1) continue;
+    const drawn = blindTrailDrawnCount.get(stroke) || 0;
+    if (drawn >= stroke.points.length) continue; // rien de nouveau
+
+    trailCtx.save();
+    trailCtx.lineJoin = "round";
+    trailCtx.lineCap = "round";
+    trailCtx.lineWidth = stroke.size;
+    trailCtx.globalAlpha = 1;
+    if (stroke.tool === "eraser") {
+      trailCtx.globalCompositeOperation = "destination-out";
+      trailCtx.strokeStyle = "rgba(0,0,0,1)";
+    } else {
+      trailCtx.globalCompositeOperation = "source-over";
+      trailCtx.strokeStyle = stroke.color;
+    }
+    const startIdx = Math.max(0, drawn - 1); // repart du dernier point déjà peint pour relier sans trou
+    trailCtx.beginPath();
+    trailCtx.moveTo(stroke.points[startIdx].x, stroke.points[startIdx].y);
+    for (let i = startIdx + 1; i < stroke.points.length; i++) {
+      trailCtx.lineTo(stroke.points[i].x, stroke.points[i].y);
+    }
+    if (stroke.points.length === 1) {
+      trailCtx.lineTo(stroke.points[0].x + 0.1, stroke.points[0].y + 0.1);
+    }
+    trailCtx.stroke();
+    trailCtx.restore();
+
+    blindTrailDrawnCount.set(stroke, stroke.points.length);
+  }
+
+  // 3) Recopie le tampon (déjà en pixels physiques, avec sa propre mise à
+  //    l'échelle DPR) tel quel sur le canvas visible.
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(blindTrailCanvas, 0, 0);
+  ctx.restore();
 }
 
 // ---- Capture des traits pour le time-lapse affiché à la révélation ----
