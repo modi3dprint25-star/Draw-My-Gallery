@@ -309,12 +309,8 @@ h2 { font-size: 1.4rem; }
 }
 .doodle-color-btn.selected { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--ink); transform: scale(1.1); }
 .doodle-clear-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
   border: 3px solid var(--ink);
   background: #fff;
-  color: var(--ink);
   border-radius: 999px;
   padding: 6px 12px;
   font-weight: 800;
@@ -323,7 +319,6 @@ h2 { font-size: 1.4rem; }
   cursor: pointer;
   box-shadow: 3px 3px 0 var(--shadow-ink);
 }
-.doodle-clear-icon { width: 15px; height: 15px; flex-shrink: 0; }
 .doodle-clear-btn:active { transform: translate(2px,2px); box-shadow: 1px 1px 0 var(--shadow-ink); }
 
 .setting-block { margin-bottom: 8px; }
