@@ -296,6 +296,7 @@ const HostLogic = (() => {
       currentVotes: new Map(),
       currentQualityVotes: new Map(),
       doodleStrokes: [], // 🎨 griffonnage collectif du lobby : petits segments {x0,y0,x1,y1,color,size}, coordonnées 0..1
+      lastVisualMode: null, // dernier mode drôle (blind, upside_down, ...) tiré, pour ne pas le retirer direct la manche suivante
     };
     room.players.set(hostId, { id: hostId, name: sanitizeName(name), avatar: avatar || "🙂", score: 0, connected: true });
     return { ok: true, room: roomStateForClient() };
@@ -779,6 +780,7 @@ const HostLogic = (() => {
     room.modeVotes = new Map();
     room.effectVotes = new Map();
     room.doodleStrokes = [];
+    room.lastVisualMode = null;
     for (const p of room.players.values()) p.score = 0;
     broadcastRoomState();
     // room_state seul ne fait pas changer d'écran côté client (il ne fait que
@@ -796,7 +798,14 @@ const HostLogic = (() => {
     room.currentAssignments = computeRoundAssignments(round);
 
     const modes = Array.from(room.settings.modes);
-    const roundVisualMode = modes[Math.floor(Math.random() * modes.length)] || "normal";
+    // On évite de retirer directement le même mode drôle (blind, upside_down, ...)
+    // deux manches de suite : on l'exclut du tirage tant qu'il reste au moins une
+    // autre option dans le pool choisi par l'hôte.
+    const modesPoolForDraw = modes.length > 1 && room.lastVisualMode != null
+      ? modes.filter((m) => m !== room.lastVisualMode)
+      : modes;
+    const roundVisualMode = modesPoolForDraw[Math.floor(Math.random() * modesPoolForDraw.length)] || "normal";
+    room.lastVisualMode = roundVisualMode;
 
     for (const [playerId, assignment] of room.currentAssignments.entries()) {
       Net.sendTo(playerId, "phase_round_start", {
