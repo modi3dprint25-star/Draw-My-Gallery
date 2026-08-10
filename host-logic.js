@@ -29,8 +29,15 @@ const PHASES = {
 };
 
 const DESCRIPTION_DURATION_SEC = 45;
+// Défilement de l'album façon "Gartic Phone" : un item à la fois, avec un
+// bouton "Suivant" que seul l'hôte de la partie voit. ALBUM_ITEM_TIMEOUT_SEC
+// est juste un filet de sécurité qui avance tout seul si l'hôte ne clique
+// pas (onglet en arrière-plan, hôte distrait, etc.) — ce n'est plus un
+// minuteur de lecture normal.
+const ALBUM_ITEM_TIMEOUT_SEC = 45;
+// Utilisées uniquement par la révélation "Cadavre exquis" (inchangée).
 const ALBUM_REVEAL_DURATION_SEC = 10;
-const ALBUM_REVEAL_DURATION_SEC_QUALITY_VOTE = 16; // laisse le temps de voter en plus de lire
+const ALBUM_REVEAL_DURATION_SEC_QUALITY_VOTE = 16;
 const VOTE_DURATION_SEC = 12;
 const PARTICIPATION_POINTS = 10;
 const VOTE_POINTS = 15;
@@ -245,6 +252,9 @@ const HostLogic = (() => {
           : onSubmitContribution(playerId, payload, cb);
       case "submit_vote": return onSubmitVote(playerId, payload, cb);
       case "submit_quality_vote": return onSubmitQualityVote(playerId, payload, cb);
+      case "advance_album_item": return onAdvanceAlbumItem(playerId, cb);
+      case "doodle_stroke": return onDoodleStroke(playerId, payload);
+      case "doodle_clear": return onDoodleClear(playerId);
       case "leave_room": return onLeave(playerId);
       case "disconnect": return onLeave(playerId);
       case "play_again": return onPlayAgain(playerId);
@@ -285,6 +295,7 @@ const HostLogic = (() => {
       currentAlbumOwnerId: null,
       currentVotes: new Map(),
       currentQualityVotes: new Map(),
+      doodleStrokes: [], // 🎨 griffonnage collectif du lobby : petits segments {x0,y0,x1,y1,color,size}, coordonnées 0..1
     };
     room.players.set(hostId, { id: hostId, name: sanitizeName(name), avatar: avatar || "🙂", score: 0, connected: true });
     return { ok: true, room: roomStateForClient() };
@@ -296,7 +307,10 @@ const HostLogic = (() => {
     if (activePlayers().length >= MAX_PLAYERS) return cb?.({ ok: false, error: `Salon complet (max ${MAX_PLAYERS} joueurs).` });
 
     room.players.set(playerId, { id: playerId, name: sanitizeName(name), avatar: avatar || "🙂", score: 0, connected: true });
-    cb?.({ ok: true, room: roomStateForClient() });
+    // On renvoie aussi le griffonnage collectif déjà en cours, pour que
+    // quelqu'un qui rejoint en retard voie tout de suite ce qui a déjà été
+    // dessiné (sinon son canvas resterait vide jusqu'au prochain trait).
+    cb?.({ ok: true, room: roomStateForClient(), doodleStrokes: room.doodleStrokes });
     broadcastRoomState();
   }
 
@@ -381,6 +395,31 @@ const HostLogic = (() => {
       room.effectVotes.set(playerId, effect);
     }
     broadcastRoomState();
+  }
+
+  // ---- 🎨 Griffonnage collectif du lobby ----
+  // Un petit canvas partagé, purement cosmétique (aucun impact sur la
+  // partie), pour occuper le salon pendant qu'on attend les retardataires.
+  // Chaque trait est relayé en direct à tout le monde ; on garde aussi
+  // l'historique complet côté hôte pour que les joueurs qui rejoignent en
+  // cours de route voient tout de suite le dessin déjà en cours.
+  const DOODLE_MAX_STROKES = 4000; // garde-fou mémoire sur une très longue attente
+  function onDoodleStroke(playerId, payload) {
+    if (!room || room.phase !== PHASES.LOBBY) return;
+    if (!payload || !room.players.has(playerId)) return;
+    const { x0, y0, x1, y1, color, size } = payload;
+    if (![x0, y0, x1, y1].every((n) => typeof n === "number" && n >= -0.05 && n <= 1.05)) return;
+    if (typeof size !== "number" || size <= 0 || size > 0.15) return;
+    const stroke = { x0, y0, x1, y1, color: typeof color === "string" ? color.slice(0, 16) : "#000000", size };
+    room.doodleStrokes.push(stroke);
+    if (room.doodleStrokes.length > DOODLE_MAX_STROKES) room.doodleStrokes.shift();
+    Net.broadcastExcept(playerId, "doodle_stroke", stroke);
+  }
+  function onDoodleClear(playerId) {
+    if (!room || room.phase !== PHASES.LOBBY) return;
+    if (!room.players.has(playerId)) return;
+    room.doodleStrokes = [];
+    Net.broadcast("doodle_cleared");
   }
 
   function onStartGame(playerId) {
@@ -739,6 +778,7 @@ const HostLogic = (() => {
     room.currentQualityVotes = new Map();
     room.modeVotes = new Map();
     room.effectVotes = new Map();
+    room.doodleStrokes = [];
     for (const p of room.players.values()) p.score = 0;
     broadcastRoomState();
     // room_state seul ne fait pas changer d'écran côté client (il ne fait que
@@ -746,6 +786,7 @@ const HostLogic = (() => {
     // on envoie donc un événement dédié pour forcer tout le monde à revenir
     // sur l'écran du lobby, comme au tout premier chargement.
     Net.broadcast("phase_lobby_start", roomStateForClient());
+    Net.broadcast("doodle_cleared");
   }
 
   // ---------------- Transitions de manche ----------------
@@ -897,6 +938,13 @@ const HostLogic = (() => {
 
     const qualityVoteEnabled = !!room.settings.qualityVoteMode;
 
+    // Défilement façon "Gartic Phone" : on garde toute la chaîne en mémoire
+    // côté hôte, mais on ne montre qu'UN item à la fois ; c'est l'hôte qui
+    // clique sur "Suivant" pour avancer (voir onAdvanceAlbumItem).
+    room.currentAlbumItems = items;
+    room.currentAlbumItemIndex = 0;
+    room.currentAlbumQualityVoteEnabled = qualityVoteEnabled;
+
     Net.broadcast("phase_album_answer", {
       ownerId,
       ownerName: owner?.name,
@@ -905,16 +953,41 @@ const HostLogic = (() => {
       votes,
       index: room.currentRevealIndex + 1,
       total: room.revealQueue.length,
+      itemIndex: 0,
       scores: publicPlayerList(),
       qualityVoteEnabled,
+      hostId: room.hostId,
     });
     broadcastRoomState();
+    startAlbumItemTimer();
+  }
 
-    const duration = qualityVoteEnabled ? ALBUM_REVEAL_DURATION_SEC_QUALITY_VOTE : ALBUM_REVEAL_DURATION_SEC;
-    startTimer(duration, "reveal_answer", () => {
-      if (qualityVoteEnabled) tallyQualityVotes(items);
-      advanceToNextAlbum();
-    });
+  /** Filet de sécurité : si l'hôte ne clique pas sur "Suivant", on avance
+   * quand même tout seul après un délai généreux (onglet inactif, etc.). */
+  function startAlbumItemTimer() {
+    startTimer(ALBUM_ITEM_TIMEOUT_SEC, "reveal_answer", () => advanceAlbumItem());
+  }
+
+  /** Seul l'hôte de la partie peut faire avancer l'album manuellement. */
+  function onAdvanceAlbumItem(playerId, cb) {
+    if (!room || room.phase !== PHASES.REVEAL || room.revealSubPhase !== "answer") return cb?.({ ok: false });
+    if (playerId !== room.hostId) return cb?.({ ok: false, error: "Seul l'hôte peut faire avancer l'album." });
+    advanceAlbumItem();
+    cb?.({ ok: true });
+  }
+
+  /** Avance d'un item dans la chaîne en cours, ou termine la chaîne. */
+  function advanceAlbumItem() {
+    if (!room || room.phase !== PHASES.REVEAL || room.revealSubPhase !== "answer") return;
+    clearTimer();
+    const items = room.currentAlbumItems || [];
+    room.currentAlbumItemIndex += 1;
+    if (room.currentAlbumItemIndex >= items.length) {
+      if (room.currentAlbumQualityVoteEnabled) tallyQualityVotes(items);
+      return advanceToNextAlbum();
+    }
+    Net.broadcast("phase_album_item", { itemIndex: room.currentAlbumItemIndex });
+    startAlbumItemTimer();
   }
 
   function onSubmitQualityVote(playerId, { itemIndex } = {}, cb) {

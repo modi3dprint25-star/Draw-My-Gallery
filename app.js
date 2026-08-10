@@ -256,7 +256,7 @@ document.getElementById("btn-join").addEventListener("click", () => {
       socket.emit("join_room", { name: state.me.name, avatar: state.me.avatar }, (res) => {
         btn.disabled = false;
         if (!res.ok) return toast(res.error || "Erreur");
-        enterLobby(res.room);
+        enterLobby(res.room, res.doodleStrokes);
       });
     },
     (errMsg) => {
@@ -269,10 +269,12 @@ document.getElementById("btn-join").addEventListener("click", () => {
 // ------------------------------------------------------------------
 // ECRAN LOBBY
 // ------------------------------------------------------------------
-function enterLobby(room) {
+function enterLobby(room, doodleStrokes) {
   state.room = room;
   showScreen("screen-lobby");
   renderLobby();
+  setupDoodleCanvasSize();
+  loadDoodleStrokes(doodleStrokes || []);
 }
 
 document.getElementById("btn-leave-lobby").addEventListener("click", () => {
@@ -727,6 +729,30 @@ function showInlineFallback(imgEl, text) {
 function hideInlineFallback(imgEl) {
   const ph = imgEl.nextElementSibling;
   if (ph && ph.classList?.contains("img-fallback")) ph.classList.add("hidden");
+}
+
+/** Déclenche le téléchargement d'une image (data URL) ou d'un texte brut,
+ * sans jamais planter si le contenu manque (photo/dessin pas encore chargé,
+ * réseau P2P qui traîne, etc.). */
+function downloadDataUrl(dataUrl, filename) {
+  if (!dataUrl) { toast("Rien à télécharger pour le moment."); return; }
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+function downloadText(text, filename) {
+  const blob = new Blob([text || ""], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  downloadDataUrl(url, filename);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+function safeFileSlug(str) {
+  return String(str || "dmg")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // enlève les accents
+    .replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "dmg";
 }
 
 // ------------------------------------------------------------------
@@ -1833,14 +1859,152 @@ socket.on("phase_album_vote", ({ index, total, finalItem, candidates, isOwner })
 // REVELATION DE L'ALBUM (réponse + qui a deviné juste)
 // ------------------------------------------------------------------
 let qualityVoteSubmitted = false;
-let albumStripCards = []; // cartes de la manche d'album en cours, indexées comme "items", pour le highlight du vote qualité
-socket.on("phase_album_answer", ({ ownerName, ownerAvatar, items, votes, index, total, qualityVoteEnabled }) => {
+let albumStripCards = []; // carte actuellement affichée dans le défilement, indexée comme "items" (pour le highlight du vote qualité)
+let currentAlbumItems = [];
+let currentAlbumQualityVoteEnabled = false;
+
+/** Construit UNE carte d'item d'album (photo / description / dessin), façon
+ * "Gartic Phone" : un seul item visible à la fois, l'hôte clique sur
+ * "Suivant" pour dévoiler la suite de la chaîne. */
+function buildAlbumStepCard(item, i, total) {
+  const card = document.createElement("div");
+  card.className = "album-item album-step" + (item.impostor ? " impostor-item" : "");
+  const label = item.type === "photo" ? "📸 Photo de départ" : item.type === "description" ? "📝 Description" : "✏️ Dessin";
+  card.innerHTML = `
+    <span class="album-item-badge">${i === 0 ? "🏁" : i}</span>
+    <div class="album-item-media"></div>
+    <div class="album-item-footer">
+      <span class="album-caption-label">${label}</span>
+      <span class="album-caption-author">${escapeHtml(item.contributorName || "")}</span>
+    </div>
+  `;
+  const media = card.querySelector(".album-item-media");
+  if (item.type === "description") {
+    media.innerHTML = `<div class="album-text">"${escapeHtml(item.content || "…")}"</div>`;
+  } else if (item.type === "drawing" && item.strokes && item.strokes.strokes && item.strokes.strokes.length) {
+    // Dessin avec traits capturés : on rejoue un petit time-lapse au lieu
+    // d'afficher directement l'image finale, puis on la remplace en douceur
+    // par l'image finale (nette) une fois le time-lapse terminé.
+    const tlCanvas = document.createElement("canvas");
+    tlCanvas.className = "album-item-timelapse";
+    media.appendChild(tlCanvas);
+    playDrawingTimelapse(tlCanvas, item.strokes, 250, () => {
+      const img = document.createElement("img");
+      img.alt = label;
+      img.className = "album-item-fade-in";
+      setImageWithFallback(img, item.content, "Image indisponible");
+      media.replaceChild(img, tlCanvas);
+    });
+  } else {
+    const img = document.createElement("img");
+    img.alt = label;
+    media.appendChild(img);
+    setImageWithFallback(img, item.content, "Image indisponible");
+  }
+  // Mode "Imposteur" : le twist est révélé ici, au moment de l'album complet.
+  if (item.impostor) {
+    const flag = document.createElement("span");
+    flag.className = "impostor-flag";
+    flag.textContent = "🎭 Détail secret ajouté par l'imposteur !";
+    card.appendChild(flag);
+  }
+  // Bouton de téléchargement de CET item précis (photo, dessin, ou texte).
+  const dlBtn = document.createElement("button");
+  dlBtn.type = "button";
+  dlBtn.className = "album-item-download-btn";
+  dlBtn.innerHTML = "⬇️ Télécharger";
+  dlBtn.addEventListener("click", () => {
+    const author = safeFileSlug(item.contributorName);
+    if (item.type === "description") {
+      downloadText(item.content || "", `dmg-etape-${i + 1}-${author}.txt`);
+    } else {
+      downloadDataUrl(item.content, `dmg-etape-${i + 1}-${author}.jpg`);
+    }
+  });
+  card.appendChild(dlBtn);
+  // Mode "Vote qualité" : une étoile par étape (sauf la photo de départ) pour voter son coup de cœur.
+  if (currentAlbumQualityVoteEnabled && item.type !== "photo") {
+    const starBtn = document.createElement("button");
+    starBtn.type = "button";
+    starBtn.className = "quality-star-btn";
+    starBtn.innerHTML = "⭐ Coup de cœur";
+    starBtn.addEventListener("click", () => {
+      if (qualityVoteSubmitted) return;
+      qualityVoteSubmitted = true;
+      document.querySelectorAll(".quality-star-btn").forEach((b) => (b.disabled = true));
+      starBtn.classList.add("chosen");
+      starBtn.innerHTML = "⭐ Voté !";
+      socket.emit("submit_quality_vote", { itemIndex: i }, (res) => {
+        if (!res?.ok) {
+          qualityVoteSubmitted = false;
+          document.querySelectorAll(".quality-star-btn").forEach((b) => (b.disabled = false));
+          starBtn.classList.remove("chosen");
+          starBtn.innerHTML = "⭐ Coup de cœur";
+        }
+      });
+    });
+    card.appendChild(starBtn);
+  }
+  return card;
+}
+
+/** Affiche l'item `i` dans le défilement vertical (l'ancien slide vers le
+ * haut et sort, le nouveau arrive du bas) et met à jour la pastille
+ * d'étape + le bouton "Suivant" réservé à l'hôte. */
+function renderAlbumStepItem(i) {
+  const items = currentAlbumItems;
+  const item = items[i];
+  if (!item) return;
+  const strip = document.getElementById("album-strip");
+
+  const card = buildAlbumStepCard(item, i, items.length);
+  card.classList.add("album-step-enter");
+  strip.appendChild(card);
+  requestAnimationFrame(() => {
+    card.classList.remove("album-step-enter");
+    card.classList.add("album-step-current");
+  });
+
+  strip.querySelectorAll(".album-step-current").forEach((old) => {
+    if (old === card) return;
+    old.classList.remove("album-step-current");
+    old.classList.add("album-step-exit");
+    setTimeout(() => old.remove(), 420);
+  });
+
+  albumStripCards[i] = card;
+  document.getElementById("album-step-index").textContent = i + 1;
+  document.getElementById("album-step-total").textContent = items.length;
+  const nextBtn = document.getElementById("btn-album-next");
+  nextBtn.textContent = i >= items.length - 1 ? "Manche suivante ➡️" : "Suivant ➡️";
+  nextBtn.disabled = false;
+  nextBtn.classList.toggle("hidden", !state.isHost);
+  document.getElementById("album-next-hint").classList.toggle("hidden", state.isHost);
+}
+
+document.getElementById("btn-album-next").addEventListener("click", () => {
+  const btn = document.getElementById("btn-album-next");
+  btn.disabled = true;
+  socket.emit("advance_album_item", {}, (res) => {
+    if (!res?.ok) btn.disabled = false;
+  });
+});
+
+// Le serveur (côté hôte) pousse cet événement à chaque clic sur "Suivant" :
+// on ne redessine que l'item concerné, pas toute la chaîne.
+socket.on("phase_album_item", ({ itemIndex }) => {
+  renderAlbumStepItem(itemIndex);
+});
+
+socket.on("phase_album_answer", ({ ownerName, ownerAvatar, items, votes, index, total, itemIndex, qualityVoteEnabled }) => {
   document.getElementById("album-index").textContent = index;
   document.getElementById("album-total").textContent = total;
   document.getElementById("album-owner-avatar").textContent = ownerAvatar || "🙂";
   document.getElementById("album-owner-title").textContent = ownerName || "?";
   qualityVoteSubmitted = false;
   albumStripCards = [];
+  currentAlbumItems = items;
+  currentAlbumQualityVoteEnabled = !!qualityVoteEnabled;
   corpseRevealToken++; // invalide un assemblage "Cadavre exquis" encore en cours de chargement
   document.getElementById("corpse-assembled-wrap").classList.add("hidden");
 
@@ -1868,90 +2032,10 @@ socket.on("phase_album_answer", ({ ownerName, ownerAvatar, items, votes, index, 
   const strip = document.getElementById("album-strip");
   strip.innerHTML = "";
 
-  const buildAlbumStrip = () => {
-    items.forEach((item, i) => {
-      const card = document.createElement("div");
-      card.className = "album-item" + (item.impostor ? " impostor-item" : "") + (i % 2 === 0 ? " tilt-left" : " tilt-right");
-      card.style.setProperty("--i", i);
-      const label = item.type === "photo" ? "📸 Photo de départ" : item.type === "description" ? "📝 Description" : "✏️ Dessin";
-      card.innerHTML = `
-        <span class="album-item-badge">${i === 0 ? "🏁" : i}</span>
-        <div class="album-item-media"></div>
-        <div class="album-item-footer">
-          <span class="album-caption-label">${label}</span>
-          <span class="album-caption-author">${escapeHtml(item.contributorName || "")}</span>
-        </div>
-      `;
-      const media = card.querySelector(".album-item-media");
-      if (item.type === "description") {
-        media.innerHTML = `<div class="album-text">"${escapeHtml(item.content || "…")}"</div>`;
-      } else if (item.type === "drawing" && item.strokes && item.strokes.strokes && item.strokes.strokes.length) {
-        // Dessin avec traits capturés : on rejoue un petit time-lapse au lieu
-        // d'afficher directement l'image finale, puis on la remplace en douceur
-        // par l'image finale (nette) une fois le time-lapse terminé.
-        const tlCanvas = document.createElement("canvas");
-        tlCanvas.className = "album-item-timelapse";
-        media.appendChild(tlCanvas);
-        const revealDelayMs = i * 120 + 420; // suit le délai d'apparition CSS de la carte (--i)
-        playDrawingTimelapse(tlCanvas, item.strokes, revealDelayMs, () => {
-          const img = document.createElement("img");
-          img.alt = label;
-          img.className = "album-item-fade-in";
-          setImageWithFallback(img, item.content, "Image indisponible");
-          media.replaceChild(img, tlCanvas);
-        });
-      } else {
-        const img = document.createElement("img");
-        img.alt = label;
-        media.appendChild(img);
-        setImageWithFallback(img, item.content, "Image indisponible");
-      }
-      // Mode "Imposteur" : le twist est révélé ici, au moment de l'album complet.
-      if (item.impostor) {
-        const flag = document.createElement("span");
-        flag.className = "impostor-flag";
-        flag.textContent = "🎭 Détail secret ajouté par l'imposteur !";
-        card.appendChild(flag);
-      }
-      // Mode "Vote qualité" : une étoile par étape (sauf la photo de départ) pour voter son coup de cœur.
-      if (qualityVoteEnabled && item.type !== "photo") {
-        const starBtn = document.createElement("button");
-        starBtn.type = "button";
-        starBtn.className = "quality-star-btn";
-        starBtn.innerHTML = "⭐ Coup de cœur";
-        starBtn.addEventListener("click", () => {
-          if (qualityVoteSubmitted) return;
-          qualityVoteSubmitted = true;
-          document.querySelectorAll(".quality-star-btn").forEach((b) => (b.disabled = true));
-          starBtn.classList.add("chosen");
-          starBtn.innerHTML = "⭐ Voté !";
-          socket.emit("submit_quality_vote", { itemIndex: i }, (res) => {
-            if (!res?.ok) {
-              qualityVoteSubmitted = false;
-              document.querySelectorAll(".quality-star-btn").forEach((b) => (b.disabled = false));
-              starBtn.classList.remove("chosen");
-              starBtn.innerHTML = "⭐ Coup de cœur";
-            }
-          });
-        });
-        card.appendChild(starBtn);
-      }
-      strip.appendChild(card);
-      albumStripCards[i] = card;
-      if (i < items.length - 1) {
-        const arrow = document.createElement("div");
-        arrow.className = "album-arrow";
-        arrow.style.setProperty("--i", i);
-        arrow.innerHTML = `<span>➡️</span>`;
-        strip.appendChild(arrow);
-      }
-    });
-  };
-
   showScreen("screen-album");
-  // D'abord un aperçu accéléré (façon flipbook) des dessins/photos de la
-  // chaîne, puis la bande complète se révèle carte par carte comme avant.
-  playAlbumFlipbook(items, buildAlbumStrip);
+  // D'abord un aperçu accéléré (façon flipbook) de toute la chaîne, puis on
+  // démarre le défilement pas-à-pas à partir du premier item.
+  playAlbumFlipbook(items, () => renderAlbumStepItem(itemIndex || 0));
 });
 
 // ---- Assemblage du carré final "Cadavre exquis photo" ----
@@ -1993,6 +2077,10 @@ async function buildCorpseAssembledSquare(quadrantContents, size = 640) {
 // "à qui c'est" (trivial ici) et sans time-lapse. ----
 const CORPSE_QUAD_LABELS = ["↖️ Haut-gauche", "↗️ Haut-droite", "↙️ Bas-gauche", "↘️ Bas-droite"];
 let corpseRevealToken = 0;
+let currentCorpseAssembledDataUrl = null;
+document.getElementById("btn-download-corpse").addEventListener("click", () => {
+  downloadDataUrl(currentCorpseAssembledDataUrl, `dmg-cadavre-exquis-assemble.jpg`);
+});
 socket.on("phase_corpse_reveal", ({ index, total, sourcePhoto, ownerName, ownerAvatar, quadrants, qualityVoteEnabled }) => {
   document.getElementById("album-index").textContent = index;
   document.getElementById("album-total").textContent = total;
@@ -2011,10 +2099,13 @@ socket.on("phase_corpse_reveal", ({ index, total, sourcePhoto, ownerName, ownerA
 
   const assembledWrap = document.getElementById("corpse-assembled-wrap");
   const assembledImg = document.getElementById("corpse-assembled-img");
+  const assembledDlBtn = document.getElementById("btn-download-corpse");
   assembledWrap.classList.add("hidden");
+  currentCorpseAssembledDataUrl = null;
   const revealToken = ++corpseRevealToken;
   buildCorpseAssembledSquare((quadrants || []).map((q) => q.content)).then((dataUrl) => {
     if (revealToken !== corpseRevealToken) return; // une autre carte a déjà pris le relais
+    currentCorpseAssembledDataUrl = dataUrl;
     setImageWithFallback(assembledImg, dataUrl, "Assemblage indisponible");
     assembledWrap.classList.remove("hidden");
   });
@@ -2223,6 +2314,121 @@ socket.on("quality_vote_result", ({ winnerName, winnerAvatar, itemIndex, votes, 
     card.appendChild(trophy);
   }
 });
+
+// ------------------------------------------------------------------
+// 🎨 GRIFFONNAGE COLLECTIF DU LOBBY
+// Un petit canvas partagé purement cosmétique (aucun impact sur la partie),
+// pour occuper le salon pendant qu'on attend les retardataires. Chaque
+// micro-segment tracé est envoyé en direct aux autres joueurs (P2P), et
+// rejoué localement chez eux — pas de "gros" dessin envoyé d'un coup.
+// ------------------------------------------------------------------
+const DOODLE_COLORS = ["#1a1a1a", "#ff5b5b", "#ff8a3d", "#ffcb3d", "#3ddc84", "#22d3c9", "#7c4dff", "#ff4fa3"];
+const DOODLE_BRUSH_FRAC = 0.014; // épaisseur du trait, en fraction de la largeur du canvas
+const doodleCanvas = document.getElementById("doodle-canvas");
+const doodleCtx = doodleCanvas.getContext("2d");
+let doodleColor = DOODLE_COLORS[0];
+let doodleDrawing = false;
+let doodleLast = null; // {x, y} en coordonnées normalisées 0..1
+
+function setupDoodleCanvasSize() {
+  const rect = doodleCanvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return; // écran pas encore visible
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  // On garde l'image déjà dessinée en la redimensionnant, plutôt que de la
+  // perdre bêtement à chaque redimensionnement de fenêtre.
+  let snapshot = null;
+  if (doodleCanvas.width > 0 && doodleCanvas.height > 0) {
+    try { snapshot = doodleCanvas.toDataURL(); } catch { snapshot = null; }
+  }
+  doodleCanvas.width = Math.round(rect.width * dpr);
+  doodleCanvas.height = Math.round(rect.height * dpr);
+  doodleCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  doodleCanvas._cssW = rect.width;
+  doodleCanvas._cssH = rect.height;
+  if (snapshot) {
+    const img = new Image();
+    img.onload = () => doodleCtx.drawImage(img, 0, 0, rect.width, rect.height);
+    img.src = snapshot;
+  }
+}
+window.addEventListener("resize", () => {
+  if (document.getElementById("screen-lobby").classList.contains("active")) setupDoodleCanvasSize();
+});
+
+function drawDoodleSegment({ x0, y0, x1, y1, color, size }) {
+  const w = doodleCanvas._cssW || doodleCanvas.getBoundingClientRect().width || 1;
+  const h = doodleCanvas._cssH || doodleCanvas.getBoundingClientRect().height || 1;
+  doodleCtx.save();
+  doodleCtx.lineJoin = "round";
+  doodleCtx.lineCap = "round";
+  doodleCtx.strokeStyle = color || "#1a1a1a";
+  doodleCtx.lineWidth = Math.max(1, (size || DOODLE_BRUSH_FRAC) * w);
+  doodleCtx.beginPath();
+  doodleCtx.moveTo(x0 * w, y0 * h);
+  doodleCtx.lineTo(x1 * w, y1 * h);
+  doodleCtx.stroke();
+  doodleCtx.restore();
+}
+
+function clearDoodleCanvas() {
+  doodleCtx.clearRect(0, 0, doodleCanvas.width, doodleCanvas.height);
+}
+
+function loadDoodleStrokes(strokes) {
+  clearDoodleCanvas();
+  for (const seg of strokes) drawDoodleSegment(seg);
+}
+
+function doodlePointFromEvent(e) {
+  const rect = doodleCanvas.getBoundingClientRect();
+  return {
+    x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
+    y: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
+  };
+}
+doodleCanvas.addEventListener("pointerdown", (e) => {
+  doodleDrawing = true;
+  doodleLast = doodlePointFromEvent(e);
+  doodleCanvas.setPointerCapture(e.pointerId);
+  // Petit point pour un simple clic sans déplacement.
+  const seg = { x0: doodleLast.x, y0: doodleLast.y, x1: doodleLast.x + 0.001, y1: doodleLast.y + 0.001, color: doodleColor, size: DOODLE_BRUSH_FRAC };
+  drawDoodleSegment(seg);
+  socket.emit("doodle_stroke", seg);
+});
+doodleCanvas.addEventListener("pointermove", (e) => {
+  if (!doodleDrawing) return;
+  const p = doodlePointFromEvent(e);
+  const seg = { x0: doodleLast.x, y0: doodleLast.y, x1: p.x, y1: p.y, color: doodleColor, size: DOODLE_BRUSH_FRAC };
+  doodleLast = p;
+  drawDoodleSegment(seg);
+  socket.emit("doodle_stroke", seg);
+});
+function doodleStopDrawing() { doodleDrawing = false; doodleLast = null; }
+doodleCanvas.addEventListener("pointerup", doodleStopDrawing);
+doodleCanvas.addEventListener("pointercancel", doodleStopDrawing);
+doodleCanvas.addEventListener("pointerleave", doodleStopDrawing);
+
+const doodleColorsWrap = document.getElementById("doodle-colors");
+DOODLE_COLORS.forEach((c, i) => {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "doodle-color-btn" + (i === 0 ? " selected" : "");
+  btn.style.background = c;
+  btn.addEventListener("click", () => {
+    doodleColor = c;
+    doodleColorsWrap.querySelectorAll(".doodle-color-btn").forEach((b) => b.classList.remove("selected"));
+    btn.classList.add("selected");
+  });
+  doodleColorsWrap.appendChild(btn);
+});
+
+document.getElementById("btn-doodle-clear").addEventListener("click", () => {
+  clearDoodleCanvas();
+  socket.emit("doodle_clear");
+});
+
+socket.on("doodle_stroke", (seg) => drawDoodleSegment(seg));
+socket.on("doodle_cleared", () => clearDoodleCanvas());
 
 // ------------------------------------------------------------------
 // SCOREBOARD

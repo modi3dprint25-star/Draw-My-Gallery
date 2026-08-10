@@ -73,6 +73,18 @@
       <h2>👥 Joueurs <span id="lobby-player-count">(0/12)</span></h2>
       <ul id="lobby-player-list" class="player-list"></ul>
       <p class="hint">De 2 à 12 joueurs. Avec 2 joueurs, la chaîne de dessins est prolongée pour rester amusante.</p>
+
+      <div class="doodle-block">
+        <h3>🎨 Griffonnage collectif</h3>
+        <p class="hint">Pendant qu'on attend, dessinez ensemble ici — ça n'a aucun effet sur la partie !</p>
+        <div class="doodle-canvas-wrap">
+          <canvas id="doodle-canvas" class="doodle-canvas"></canvas>
+        </div>
+        <div class="doodle-toolbar">
+          <div id="doodle-colors" class="doodle-colors"></div>
+          <button type="button" id="btn-doodle-clear" class="btn btn-ghost doodle-clear-btn">🧹 Effacer</button>
+        </div>
+      </div>
     </div>
 
     <div class="card settings-card">
@@ -351,9 +363,13 @@
     <div id="corpse-assembled-wrap" class="corpse-assembled-wrap hidden">
       <span class="mini-label">🧩 Le dessin assemblé</span>
       <img id="corpse-assembled-img" class="corpse-assembled-img" alt="Dessin assemblé du cadavre exquis" />
+      <button type="button" id="btn-download-corpse" class="album-item-download-btn corpse-download-btn">⬇️ Télécharger le dessin final</button>
     </div>
     <div class="album-strip-wrap">
+      <div class="album-step-progress">Étape <span id="album-step-index">1</span>/<span id="album-step-total">1</span></div>
       <div id="album-strip" class="album-strip"></div>
+      <button type="button" id="btn-album-next" class="btn-album-next hidden">Suivant ➡️</button>
+      <div id="album-next-hint" class="album-next-hint hidden">⏳ En attente que l'hôte fasse défiler…</div>
     </div>
   </div>
 </section>
@@ -460,8 +476,8 @@
 </div>
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<script src="net.js?v=6"></script>
-<script src="host-logic.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="net.js?v=7"></script>
+<script src="host-logic.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

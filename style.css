@@ -274,6 +274,42 @@ h2 { font-size: 1.4rem; }
 .player-list .p-status { margin-left: auto; font-size: 0.75rem; color: #7a6f95; }
 .player-list .host-badge { background: var(--pink); color: #fff; border-radius: 8px; padding: 1px 8px; font-size: 0.7rem; }
 
+/* ---------------------- Griffonnage collectif du lobby ---------------------- */
+.doodle-block {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 3px dashed var(--ink);
+}
+.doodle-block h3 { margin: 0 0 2px; font-size: 1rem; }
+.doodle-canvas-wrap {
+  margin-top: 8px;
+  border: 3px solid var(--ink);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: 4px 4px 0 var(--shadow-ink);
+  background: repeating-linear-gradient(45deg, #fff, #fff 10px, #faf8ff 10px, #faf8ff 20px);
+  touch-action: none;
+}
+.doodle-canvas { display: block; width: 100%; height: 190px; cursor: crosshair; }
+.doodle-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+}
+.doodle-colors { display: flex; gap: 6px; flex-wrap: wrap; }
+.doodle-color-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 3px solid var(--ink);
+  cursor: pointer;
+  padding: 0;
+}
+.doodle-color-btn.selected { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--ink); transform: scale(1.1); }
+.doodle-clear-btn { padding: 6px 12px; font-size: 0.78rem; white-space: nowrap; }
+
 .setting-block { margin-bottom: 8px; }
 .chip-group { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
@@ -914,6 +950,24 @@ h2 { font-size: 1.4rem; }
   box-shadow: 6px 6px 0 var(--shadow-ink);
   background: #fff;
 }
+.album-item-download-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  margin-top: 8px;
+  border: 3px solid var(--ink);
+  background: #fff;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-weight: 800;
+  font-size: 0.76rem;
+  cursor: pointer;
+  box-shadow: 3px 3px 0 var(--shadow-ink);
+}
+.album-item-download-btn:active { transform: translate(2px,2px); box-shadow: 1px 1px 0 var(--shadow-ink); }
+.corpse-download-btn { width: min(72vw, 300px); margin-top: 2px; }
 .album-flipbook img {
   display: block;
   width: 100%;
@@ -945,33 +999,43 @@ h2 { font-size: 1.4rem; }
   background: repeating-linear-gradient(135deg, #f6f2ff, #f6f2ff 10px, #efe8ff 10px, #efe8ff 20px);
   border-top: 3px dashed var(--ink);
 }
+.album-step-progress {
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #6b5da8;
+  padding-top: 10px;
+}
+/* Défilement "façon Gartic Phone" : un seul item visible à la fois, qui
+   glisse verticalement (du bas vers le haut) quand l'hôte clique sur
+   "Suivant" — plus de bande horizontale avec toute la chaîne d'un coup. */
 .album-strip {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  overflow-x: auto;
-  padding: 18px 22px 20px;
-  scroll-snap-type: x mandatory;
+  position: relative;
+  overflow: hidden;
+  min-height: 380px;
+  padding: 14px 0 6px;
 }
 .album-item {
-  flex: 0 0 auto;
-  width: 190px;
-  scroll-snap-align: center;
+  width: 100%;
+  max-width: 260px;
+  margin: 0 auto;
   position: relative;
   border: 3px solid var(--ink);
   border-radius: 6px;
   background: #fff;
   padding: 10px 10px 12px;
   box-shadow: 5px 5px 0 var(--shadow-ink);
-  opacity: 0;
-  transform: translateY(16px) scale(0.9) rotate(0deg);
-  animation: albumCardIn 0.4s cubic-bezier(.2,1.2,.4,1) forwards;
-  animation-delay: calc(var(--i, 0) * 0.12s);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
-.album-item.tilt-left { --tilt: -3deg; }
-.album-item.tilt-right { --tilt: 3deg; }
-.album-item:hover { transform: translateY(0) scale(1.04) rotate(0deg) !important; box-shadow: 6px 6px 0 var(--shadow-ink); z-index: 2; }
+.album-step {
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  top: 14px;
+  transition: transform 0.4s cubic-bezier(.2,.8,.2,1), opacity 0.3s ease;
+}
+.album-step-enter { transform: translateY(38px); opacity: 0; }
+.album-step-current { transform: translateY(0); opacity: 1; }
+.album-step-exit { transform: translateY(-38px); opacity: 0; }
 .album-item-badge {
   position: absolute;
   top: -12px;
@@ -1063,7 +1127,7 @@ h2 { font-size: 1.4rem; }
 .album-item.quality-winner {
   border-color: var(--yellow);
   box-shadow: 0 0 0 3px var(--yellow), 5px 5px 0 var(--shadow-ink);
-  animation: albumCardIn 0.4s cubic-bezier(.2,1.2,.4,1) forwards, winnerGlow 1.6s ease-in-out infinite;
+  animation: winnerGlow 1.6s ease-in-out infinite;
 }
 .quality-winner-badge {
   display: block;
@@ -1076,6 +1140,28 @@ h2 { font-size: 1.4rem; }
   border: 2px solid var(--ink);
   border-radius: 999px;
   padding: 3px 8px;
+}
+.btn-album-next {
+  display: block;
+  margin: 12px auto 4px;
+  border: 3px solid var(--ink);
+  background: var(--yellow);
+  border-radius: 999px;
+  padding: 10px 22px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 0.9rem;
+  cursor: pointer;
+  box-shadow: 4px 4px 0 var(--shadow-ink);
+}
+.btn-album-next:active { transform: translate(2px,2px); box-shadow: 2px 2px 0 var(--shadow-ink); }
+.btn-album-next:disabled { opacity: 0.6; cursor: not-allowed; }
+.album-next-hint {
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #9a8fb8;
+  margin: 10px auto 4px;
 }
 .album-arrow {
   flex: 0 0 auto;
