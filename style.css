@@ -308,7 +308,18 @@ h2 { font-size: 1.4rem; }
   padding: 0;
 }
 .doodle-color-btn.selected { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--ink); transform: scale(1.1); }
-.doodle-clear-btn { padding: 6px 12px; font-size: 0.78rem; white-space: nowrap; }
+.doodle-clear-btn {
+  border: 3px solid var(--ink);
+  background: #fff;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-weight: 800;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 3px 3px 0 var(--shadow-ink);
+}
+.doodle-clear-btn:active { transform: translate(2px,2px); box-shadow: 1px 1px 0 var(--shadow-ink); }
 
 .setting-block { margin-bottom: 8px; }
 .chip-group { display: flex; flex-wrap: wrap; gap: 8px; }
