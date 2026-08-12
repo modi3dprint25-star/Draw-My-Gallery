@@ -6,6 +6,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Draw My Gallery</title>
 
+<!-- Google AdSense : vérification de propriété du site -->
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1473050368177142"
+     crossorigin="anonymous"></script>
+
 <!-- PWA / plein écran mobile : "Ajouter à l'écran d'accueil" lance le jeu
      sans barres de navigateur, sur iPhone comme sur Android. -->
 <link rel="manifest" href="manifest.json" />
@@ -229,6 +233,16 @@
       <p id="lobby-not-host" class="hint hidden">En attente que l'hôte lance la partie…</p>
     </div>
   </div>
+
+  <!-- Pub AdSense : bannière en bas du lobby -->
+  <div class="ad-slot ad-slot-lobby">
+    <ins class="adsbygoogle"
+         style="display:block"
+         data-ad-client="ca-pub-1473050368177142"
+         data-ad-slot="REMPLACE_PAR_TON_SLOT_LOBBY"
+         data-ad-format="auto"
+         data-full-width-responsive="true"></ins>
+  </div>
 </section>
 
 <!-- ===================== ECRAN : TIRAGE & VALIDATION DE LA PHOTO ===================== -->
@@ -381,6 +395,16 @@
     <ol id="scoreboard-list" class="scoreboard-list"></ol>
     <button id="btn-play-again" class="btn btn-primary btn-big hidden">🔁 Rejouer</button>
     <button id="btn-back-home" class="btn btn-secondary btn-big">🏠 Accueil</button>
+
+    <!-- Pub AdSense : affichée à la fin de chaque partie -->
+    <div class="ad-slot ad-slot-scoreboard">
+      <ins class="adsbygoogle"
+           style="display:block"
+           data-ad-client="ca-pub-1473050368177142"
+           data-ad-slot="REMPLACE_PAR_TON_SLOT_SCOREBOARD"
+           data-ad-format="auto"
+           data-full-width-responsive="true"></ins>
+    </div>
   </div>
 </section>
 
@@ -479,5 +503,19 @@
 <script src="net.js?v=7"></script>
 <script src="host-logic.js?v=7"></script>
 <script src="app.js?v=7"></script>
+<script>
+  // Charge les deux emplacements pub (lobby + fin de partie). On ne pousse
+  // qu'une seule fois par bloc <ins> — AdSense râle si on le fait 2x sur le
+  // même élément, donc pas besoin de refaire ça à chaque changement d'écran.
+  (function () {
+    try {
+      document.querySelectorAll(".ad-slot .adsbygoogle").forEach(() => {
+        (window.adsbygoogle = window.adsbygoogle || []).push({});
+      });
+    } catch (e) {
+      console.warn("[ads] chargement pub impossible :", e);
+    }
+  })();
+</script>
 </body>
 </html>

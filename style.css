@@ -258,6 +258,24 @@ h2 { font-size: 1.4rem; }
 @media (min-width: 760px) {
   .lobby-grid { grid-template-columns: 1fr 1.2fr; align-items: start; }
 }
+
+/* ---------------------- Emplacements pub (AdSense) ---------------------- */
+.ad-slot {
+  width: 100%;
+  max-width: 900px;
+  margin: 4px auto 0;
+  background: #fff;
+  border: 3px solid var(--ink);
+  border-radius: var(--radius-sm);
+  box-shadow: 4px 4px 0 var(--shadow-ink);
+  padding: 8px;
+  min-height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.ad-slot-scoreboard { max-width: 460px; margin: 18px auto 0; }
 .player-list { list-style: none; padding: 0; margin: 8px 0 0; }
 .player-list li {
   display: flex;

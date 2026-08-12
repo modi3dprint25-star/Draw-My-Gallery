@@ -736,22 +736,13 @@ const HostLogic = (() => {
     room.effectVotes.delete(playerId);
     broadcastRoomState();
 
-    if (room.phase === PHASES.ROUND) {
-      const active = activePlayers();
-      if (room.settings.corpseMode) {
-        const done = active.every((p) => {
-          const a = room.currentAssignments.get(p.id);
-          return !a || room.corpseBoards[a.boardIndex].quadrants[room.currentRound] != null;
-        });
-        if (done) { clearTimer(); advanceCorpseRound(); }
-      } else {
-        const done = active.every((p) => {
-          const a = room.currentAssignments.get(p.id);
-          return !a || room.chains.get(a.chainIndex)[room.currentRound];
-        });
-        if (done) { clearTimer(); advanceRound(); }
-      }
-    }
+    // Important : on ne recalcule PLUS "tout le monde a fini ?" ici. Une
+    // déconnexion (même une micro-coupure réseau d'une fraction de seconde)
+    // ne doit jamais, à elle seule, clôturer la manche en cours pour tout
+    // le monde — sinon un joueur encore en train de dessiner peut se faire
+    // couper l'herbe sous le pied sans prévenir. On laisse le minuteur de
+    // la manche suivre son cours normalement ; s'il manque une case à la
+    // fin, le filet de sécurité (SUBMISSION_GRACE_MS) la remplit tout seul.
 
     if (room.phase === PHASES.REVEAL && room.revealSubPhase === "vote") {
       const voters = activePlayers().filter((p) => p.id !== room.currentAlbumOwnerId);
