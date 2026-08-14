@@ -109,6 +109,90 @@ function buildSkinPicker(container) {
 }
 buildSkinPicker(document.getElementById("skin-picker"));
 
+// Palette pour les confettis (repris de SWATCH_COLORS + variantes vives)
+const CONFETTI_COLORS = ["#ff5b5b", "#ffcb3d", "#22d3c9", "#7c4dff", "#3ddc84", "#ff4fa3", "#ff8a3d"];
+
+// Ajoute les particules décoratives (confettis/étincelles) sur une carte de
+// révélation selon le skin choisi par son auteur. Le néon n'a besoin de rien
+// ici : tout son effet est en CSS pur (::before/::after) via la classe posée
+// sur la carte. Génère de vrais éléments (au lieu d'un dégradé CSS plat) pour
+// un rendu bien plus riche : chaque particule a sa propre position/couleur/
+// vitesse/délai aléatoires.
+function decorateWithSkin(card, skinId) {
+  if (skinId === "confetti") {
+    // Flash lumineux au moment où les confettis "éclatent"
+    const flash = document.createElement("span");
+    flash.className = "confetti-flash";
+    card.appendChild(flash);
+
+    const count = 20;
+    for (let i = 0; i < count; i++) {
+      const piece = document.createElement("span");
+      piece.className = "confetti-piece " + (Math.random() < 0.5 ? "round" : "square");
+      const left = Math.random() * 96 + 2;
+      const drift = (Math.random() * 70 - 35).toFixed(0) + "px";
+      const spin = (360 + Math.random() * 360).toFixed(0) + "deg";
+      const duration = (0.9 + Math.random() * 0.6).toFixed(2) + "s";
+      const delay = (Math.random() * 0.4).toFixed(2) + "s";
+      piece.style.left = left + "%";
+      piece.style.background = CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)];
+      piece.style.setProperty("--drift", drift);
+      piece.style.setProperty("--spin", spin);
+      piece.style.animationDuration = duration;
+      piece.style.animationDelay = delay;
+      card.appendChild(piece);
+    }
+  } else if (skinId === "neon") {
+    // Reflet vitré qui balaie la carte à l'apparition
+    const sheen = document.createElement("span");
+    sheen.className = "neon-sheen";
+    sheen.style.animationDelay = "0.15s";
+    card.appendChild(sheen);
+
+    // Petites braises colorées qui montent en continu le long de la carte
+    const emberColors = ["#7c4dff", "#ff4fa3", "#22d3c9", "#ffcb3d"];
+    for (let i = 0; i < 8; i++) {
+      const ember = document.createElement("span");
+      ember.className = "neon-ember";
+      ember.style.left = (Math.random() * 92 + 4) + "%";
+      ember.style.background = emberColors[Math.floor(Math.random() * emberColors.length)];
+      ember.style.animationDuration = (2.1 + Math.random() * 1.3) + "s";
+      ember.style.animationDelay = (Math.random() * 3).toFixed(2) + "s";
+      card.appendChild(ember);
+    }
+  } else if (skinId === "sparkle") {
+    const spots = [
+      { top: "-10%", left: "6%" }, { top: "8%", left: "88%" },
+      { top: "78%", left: "92%" }, { top: "92%", left: "10%" },
+      { top: "40%", left: "-6%" }, { top: "30%", left: "100%" },
+    ];
+    spots.forEach((pos, i) => {
+      const star = document.createElement("span");
+      star.className = "sparkle-star";
+      star.textContent = "✨";
+      star.style.top = pos.top;
+      star.style.left = pos.left;
+      star.style.fontSize = (0.85 + Math.random() * 0.6).toFixed(2) + "rem";
+      star.style.animationDuration = (0.9 + Math.random() * 0.6).toFixed(2) + "s";
+      star.style.animationDelay = (i * 0.15).toFixed(2) + "s";
+      card.appendChild(star);
+    });
+    // Grand éclat façon "flare" dans un coin
+    const flare = document.createElement("span");
+    flare.className = "sparkle-flare";
+    card.appendChild(flare);
+    // Fine poussière dorée qui tombe doucement
+    for (let i = 0; i < 10; i++) {
+      const dust = document.createElement("span");
+      dust.className = "sparkle-dust";
+      dust.style.left = (Math.random() * 96 + 2) + "%";
+      dust.style.animationDuration = (1.4 + Math.random() * 0.8) + "s";
+      dust.style.animationDelay = (Math.random() * 0.6).toFixed(2) + "s";
+      card.appendChild(dust);
+    }
+  }
+}
+
 function readNameInput() {
   const val = document.getElementById("input-name").value.trim();
   state.me.name = val || `Joueur${Math.floor(Math.random() * 1000)}`;
@@ -1983,6 +2067,7 @@ function buildAlbumStepCard(item, i, total) {
     });
     card.appendChild(starBtn);
   }
+  if (skinClass) decorateWithSkin(card, item.contributorSkin);
   return card;
 }
 
@@ -2196,6 +2281,7 @@ socket.on("phase_corpse_reveal", ({ index, total, sourcePhoto, ownerName, ownerA
       card.appendChild(starBtn);
       albumStripCards[quadIndex] = card;
     }
+    if (skinClass) decorateWithSkin(card, item.contributorSkin);
     strip.appendChild(card);
     if (i < items.length - 1) {
       const arrow = document.createElement("div");
