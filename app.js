@@ -26,9 +26,16 @@ if ("serviceWorker" in navigator) {
 
 const AVATARS = ["🐱", "🐶", "🦊", "🐼", "🐸", "🐵", "🦄", "🐙", "🦖", "🐧", "🐝", "🦋"];
 const SWATCH_COLORS = ["#1a1a1a", "#ffffff", "#ff5b5b", "#ff8a3d", "#ffcb3d", "#3ddc84", "#22d3c9", "#7c4dff", "#ff4fa3"];
+// 🎨 Skins de révélation (version de test, tous gratuits pour l'instant).
+const REVEAL_SKINS = [
+  { id: "default", emoji: "⬜", label: "Classique" },
+  { id: "confetti", emoji: "🎉", label: "Confettis" },
+  { id: "neon", emoji: "💜", label: "Néon" },
+  { id: "sparkle", emoji: "✨", label: "Étincelles" },
+];
 
 const state = {
-  me: { name: "", avatar: AVATARS[0] },
+  me: { name: "", avatar: AVATARS[0], revealSkin: "default" },
   room: null,
   isHost: false,
   drawing: {
@@ -77,6 +84,30 @@ AVATARS.forEach((a, i) => {
   });
   avatarPicker.appendChild(btn);
 });
+
+// ------------------------------------------------------------------
+// SKIN DE RÉVÉLATION (choisi en pleine lobby ET en fin de partie, synchronisé à tout le monde)
+// ------------------------------------------------------------------
+function buildSkinPicker(container) {
+  REVEAL_SKINS.forEach((s, i) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "skin-option" + (i === 0 ? " selected" : "");
+    btn.dataset.skin = s.id;
+    btn.innerHTML = `<span class="skin-option-emoji">${s.emoji}</span><span class="skin-option-label">${s.label}</span>`;
+    btn.addEventListener("click", () => {
+      state.me.revealSkin = s.id;
+      document.querySelectorAll(".skin-option").forEach((el) => el.classList.remove("selected"));
+      document.querySelectorAll(`.skin-option[data-skin="${s.id}"]`).forEach((el) => el.classList.add("selected"));
+      // On ne peut choisir qu'une fois en salon (avant, on n'a pas encore de
+      // playerId côté hôte) — avant ça, le clic met juste à jour state.me,
+      // envoyé automatiquement une fois dans le lobby (voir enterLobby).
+      if (state.room) socket.emit("update_reveal_skin", { skin: s.id }, () => {});
+    });
+    container.appendChild(btn);
+  });
+}
+buildSkinPicker(document.getElementById("skin-picker"));
 
 function readNameInput() {
   const val = document.getElementById("input-name").value.trim();
@@ -467,6 +498,12 @@ function renderLobby() {
   document.getElementById("btn-start-game").classList.toggle("hidden", !state.isHost);
   document.getElementById("lobby-not-host").classList.toggle("hidden", state.isHost);
   document.getElementById("lobby-hint").classList.toggle("hidden", !state.isHost);
+  const me = room.players.find((p) => p.id === socket.id);
+  if (me) {
+    document.querySelectorAll(".skin-option").forEach((el) => {
+      el.classList.toggle("selected", el.dataset.skin === (me.revealSkin || "default"));
+    });
+  }
   renderModeVoteAvatars();
 }
 
@@ -1868,7 +1905,8 @@ let currentAlbumQualityVoteEnabled = false;
  * "Suivant" pour dévoiler la suite de la chaîne. */
 function buildAlbumStepCard(item, i, total) {
   const card = document.createElement("div");
-  card.className = "album-item album-step" + (item.impostor ? " impostor-item" : "");
+  const skinClass = item.contributorSkin && item.contributorSkin !== "default" ? ` skin-${item.contributorSkin}` : "";
+  card.className = "album-item album-step" + (item.impostor ? " impostor-item" : "") + skinClass;
   const label = item.type === "photo" ? "📸 Photo de départ" : item.type === "description" ? "📝 Description" : "✏️ Dessin";
   card.innerHTML = `
     <span class="album-item-badge">${i === 0 ? "🏁" : i}</span>
@@ -2112,12 +2150,13 @@ socket.on("phase_corpse_reveal", ({ index, total, sourcePhoto, ownerName, ownerA
 
   const strip = document.getElementById("album-strip");
   strip.innerHTML = "";
-  const items = [{ label: "📸 Photo de départ", content: sourcePhoto, contributorName: "", isPhoto: true }]
-    .concat((quadrants || []).map((q, i) => ({ label: CORPSE_QUAD_LABELS[i], content: q.content, contributorName: q.contributorName })));
+  const items = [{ label: "📸 Photo de départ", content: sourcePhoto, contributorName: "", contributorSkin: "default", isPhoto: true }]
+    .concat((quadrants || []).map((q, i) => ({ label: CORPSE_QUAD_LABELS[i], content: q.content, contributorName: q.contributorName, contributorSkin: q.contributorSkin || "default" })));
 
   items.forEach((item, i) => {
     const card = document.createElement("div");
-    card.className = "album-item" + (i % 2 === 0 ? " tilt-left" : " tilt-right");
+    const skinClass = item.contributorSkin && item.contributorSkin !== "default" ? ` skin-${item.contributorSkin}` : "";
+    card.className = "album-item" + (i % 2 === 0 ? " tilt-left" : " tilt-right") + skinClass;
     card.style.setProperty("--i", i);
     card.innerHTML = `
       <span class="album-item-badge">${i === 0 ? "🏁" : i}</span>

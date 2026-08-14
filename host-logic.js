@@ -20,6 +20,12 @@ const EXTRA_TRANSMISSION_ROUNDS_FOR_DUO = 3; // avec 2 joueurs : Dessin -> B -> 
 
 const GAME_MODES = ["normal", "blind", "upside_down", "wobbly", "giant_brush", "mystery_color", "manege", "derive"];
 
+// 🎨 Skins de révélation (version de test, en accès libre pour l'instant —
+// à terme certains seront payants via Play Billing). Purement cosmétique :
+// change juste l'effet visuel joué quand CE joueur est l'auteur de l'étape
+// révélée dans l'album, vu par TOUT LE MONDE (pas seulement par lui).
+const REVEAL_SKINS = ["default", "confetti", "neon", "sparkle"];
+
 const PHASES = {
   LOBBY: "lobby",
   PHOTO_VALIDATION: "photo_validation",
@@ -104,6 +110,7 @@ const HostLogic = (() => {
       id: p.id,
       name: p.name,
       avatar: p.avatar,
+      revealSkin: p.revealSkin || "default",
       score: p.score,
       connected: p.connected,
       photoValidated: !!room.photos.get(p.id),
@@ -243,6 +250,7 @@ const HostLogic = (() => {
       case "update_settings": return onUpdateSettings(playerId, payload);
       case "vote_mode": return onVoteMode(playerId, payload);
       case "vote_effect": return onVoteEffect(playerId, payload);
+      case "update_reveal_skin": return onUpdateRevealSkin(playerId, payload);
       case "start_game": return onStartGame(playerId);
       case "validate_photo": return onValidatePhoto(playerId, payload, cb);
       case "draw_step": return onDrawStep(playerId, payload);
@@ -298,7 +306,7 @@ const HostLogic = (() => {
       doodleStrokes: [], // 🎨 griffonnage collectif du lobby : petits segments {x0,y0,x1,y1,color,size}, coordonnées 0..1
       lastVisualMode: null, // dernier mode drôle (blind, upside_down, ...) tiré, pour ne pas le retirer direct la manche suivante
     };
-    room.players.set(hostId, { id: hostId, name: sanitizeName(name), avatar: avatar || "🙂", score: 0, connected: true });
+    room.players.set(hostId, { id: hostId, name: sanitizeName(name), avatar: avatar || "🙂", revealSkin: "default", score: 0, connected: true });
     return { ok: true, room: roomStateForClient() };
   }
 
@@ -307,7 +315,7 @@ const HostLogic = (() => {
     if (room.phase !== PHASES.LOBBY) return cb?.({ ok: false, error: "La partie a déjà commencé." });
     if (activePlayers().length >= MAX_PLAYERS) return cb?.({ ok: false, error: `Salon complet (max ${MAX_PLAYERS} joueurs).` });
 
-    room.players.set(playerId, { id: playerId, name: sanitizeName(name), avatar: avatar || "🙂", score: 0, connected: true });
+    room.players.set(playerId, { id: playerId, name: sanitizeName(name), avatar: avatar || "🙂", revealSkin: "default", score: 0, connected: true });
     // On renvoie aussi le griffonnage collectif déjà en cours, pour que
     // quelqu'un qui rejoint en retard voie tout de suite ce qui a déjà été
     // dessiné (sinon son canvas resterait vide jusqu'au prochain trait).
@@ -395,6 +403,18 @@ const HostLogic = (() => {
     } else {
       room.effectVotes.set(playerId, effect);
     }
+    broadcastRoomState();
+  }
+
+  // 🎨 Choix du skin de révélation : contrairement aux votes de mode/effet,
+  // TOUT LE MONDE (y compris l'hôte) choisit directement le sien, ça n'a
+  // aucun impact sur les réglages de la partie — juste sur ce qui s'affiche
+  // à l'écran quand ses dessins/textes sont révélés dans l'album.
+  function onUpdateRevealSkin(playerId, { skin } = {}) {
+    if (!room || room.phase !== PHASES.LOBBY) return;
+    const player = room.players.get(playerId);
+    if (!player || !REVEAL_SKINS.includes(skin)) return;
+    player.revealSkin = skin;
     broadcastRoomState();
   }
 
@@ -693,6 +713,7 @@ const HostLogic = (() => {
         content,
         contributorId,
         contributorName: room.players.get(contributorId)?.name,
+        contributorSkin: room.players.get(contributorId)?.revealSkin || "default",
       };
     });
 
@@ -909,7 +930,7 @@ const HostLogic = (() => {
     const owner = room.players.get(ownerId);
     const chain = room.chains.get(chainIndex);
 
-    const items = [{ type: "photo", content: room.photos.get(ownerId), contributorId: ownerId, contributorName: owner?.name, impostor: false, loopback: false }];
+    const items = [{ type: "photo", content: room.photos.get(ownerId), contributorId: ownerId, contributorName: owner?.name, contributorSkin: owner?.revealSkin || "default", impostor: false, loopback: false }];
     chain.forEach((entry) => {
       const contributor = room.players.get(entry.contributorId);
       items.push({
@@ -917,6 +938,7 @@ const HostLogic = (() => {
         content: entry.content,
         contributorId: entry.contributorId,
         contributorName: contributor?.name,
+        contributorSkin: contributor?.revealSkin || "default",
         impostor: !!entry.impostor,
         loopback: !!entry.loopback,
         strokes: entry.type === "drawing" ? entry.strokes || null : undefined,

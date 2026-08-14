@@ -299,6 +299,38 @@ h2 { font-size: 1.4rem; }
   border-top: 3px dashed var(--ink);
 }
 .doodle-block h3 { margin: 0 0 2px; font-size: 1rem; }
+
+.skin-block {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 3px dashed var(--ink);
+}
+.skin-block h3 { margin: 0 0 2px; font-size: 1rem; }
+.skin-picker {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+.skin-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: #fff;
+  border: 3px solid var(--ink);
+  border-radius: var(--radius-sm);
+  padding: 8px 4px;
+  cursor: pointer;
+  box-shadow: 3px 3px 0 var(--shadow-ink);
+}
+.skin-option-emoji { font-size: 1.3rem; }
+.skin-option-label { font-size: 0.68rem; font-weight: 800; }
+.skin-option.selected {
+  background: var(--yellow);
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--shadow-ink);
+}
 .doodle-canvas-wrap {
   margin-top: 8px;
   border: 3px solid var(--ink);
@@ -1095,6 +1127,59 @@ h2 { font-size: 1.4rem; }
   height: 150px;
   object-fit: contain;
   background: #f4f4f4;
+}
+
+/* ---------------------- Skins de révélation ---------------------- */
+/* Purement décoratif : ces classes sont posées sur .album-item selon le skin
+   choisi par l'auteur de l'étape (voir contributorSkin côté app.js). Comme
+   chaque carte est recréée dans le DOM à chaque révélation, les animations
+   (non "infinite" pour confetti/sparkle) se rejouent automatiquement. */
+
+.album-item.skin-confetti::after {
+  content: "";
+  position: absolute;
+  inset: -20px 0 auto 0;
+  height: 140%;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle, #ff5b5b 3px, transparent 4px),
+    radial-gradient(circle, #ffcb3d 3px, transparent 4px),
+    radial-gradient(circle, #22d3c9 3px, transparent 4px),
+    radial-gradient(circle, #7c4dff 3px, transparent 4px),
+    radial-gradient(circle, #3ddc84 3px, transparent 4px);
+  background-size: 40px 40px;
+  background-repeat: repeat;
+  background-position: 0 -40px, 15px -10px, 30px -60px, 5px -90px, 22px -25px;
+  animation: skin-confetti-fall 1.4s ease-out 1;
+  opacity: 0.9;
+}
+@keyframes skin-confetti-fall {
+  from { background-position: 0 -40px, 15px -10px, 30px -60px, 5px -90px, 22px -25px; opacity: 1; }
+  to   { background-position: 0 220px, 15px 250px, 30px 200px, 5px 170px, 22px 235px; opacity: 0; }
+}
+
+.album-item.skin-neon {
+  border-color: #7c4dff;
+  animation: skin-neon-pulse 1.6s ease-in-out infinite;
+}
+@keyframes skin-neon-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px #7c4dff, 0 0 14px 3px rgba(124,77,255,0.5), 5px 5px 0 var(--shadow-ink); }
+  50%      { box-shadow: 0 0 0 3px #ff4fa3, 0 0 26px 8px rgba(255,79,163,0.75), 5px 5px 0 var(--shadow-ink); }
+}
+
+.album-item.skin-sparkle::before,
+.album-item.skin-sparkle::after {
+  content: "✨";
+  position: absolute;
+  font-size: 1.2rem;
+  pointer-events: none;
+  animation: skin-sparkle-twinkle 1.2s ease-in-out infinite;
+}
+.album-item.skin-sparkle::before { top: -14px; left: -10px; }
+.album-item.skin-sparkle::after  { bottom: -12px; right: -8px; font-size: 1rem; animation-delay: 0.6s; }
+@keyframes skin-sparkle-twinkle {
+  0%, 100% { opacity: 0.15; transform: scale(0.7) rotate(0deg); }
+  50%      { opacity: 1; transform: scale(1.15) rotate(15deg); }
 }
 .album-item img.album-item-fade-in {
   animation: albumImgFadeIn 0.25s ease both;
