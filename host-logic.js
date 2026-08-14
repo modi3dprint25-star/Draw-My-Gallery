@@ -24,7 +24,7 @@ const GAME_MODES = ["normal", "blind", "upside_down", "wobbly", "giant_brush", "
 // à terme certains seront payants via Play Billing). Purement cosmétique :
 // change juste l'effet visuel joué quand CE joueur est l'auteur de l'étape
 // révélée dans l'album, vu par TOUT LE MONDE (pas seulement par lui).
-const REVEAL_SKINS = ["default", "confetti", "neon", "sparkle"];
+const VALID_REVEAL_SKINS = ["default", "confetti", "neon", "sparkle"];
 
 const PHASES = {
   LOBBY: "lobby",
@@ -413,7 +413,7 @@ const HostLogic = (() => {
   function onUpdateRevealSkin(playerId, { skin } = {}) {
     if (!room || room.phase !== PHASES.LOBBY) return;
     const player = room.players.get(playerId);
-    if (!player || !REVEAL_SKINS.includes(skin)) return;
+    if (!player || !VALID_REVEAL_SKINS.includes(skin)) return;
     player.revealSkin = skin;
     broadcastRoomState();
   }
